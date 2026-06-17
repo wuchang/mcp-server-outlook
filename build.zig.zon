@@ -1,0 +1,13 @@
+.{
+    .name = .outlook_mcp,
+    .version = "0.1.0",
+    .fingerprint = 0x35ca73e3243da4dc,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "usage.txt",
+    },
+    .dependencies = .{},
+}

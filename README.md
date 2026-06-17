@@ -1,7 +1,6 @@
 # Microsoft Graph MCP (Zig)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Zig](https://img.shields.io/badge/Zig-0.14-orange)](https://ziglang.org)
+[![Zig](https://img.shields.io/badge/Zig-0.16-orange)](https://ziglang.org)
 
 一个 Zig 实现的 MCP Server，通过 Microsoft Graph API 操作 Outlook 邮件、日历和待办任务。
 编译为单二进制，配合任何支持 MCP 协议的 AI agent 使用。
@@ -27,21 +26,67 @@
 ## 构建
 
 ```bash
+# 需要 zig 0.16+ 和系统 OpenSSL（libssl + libcrypto）
 zig build -Doptimize=ReleaseSafe
-./zig-out/bin/outlook-mcp
 ```
-
-依赖 **Zig 0.14+**，零外部依赖。
 
 ## 配置
 
-设置环境变量 `AZURE_CLIENT_ID`，首次运行会弹出浏览器进行 Device Code 登录。
+### 方式一：配置文件（推荐）
+
+写入 `~/.config/outlook-mcp/config`：
+
+```ini
+CLIENT_ID = "your-app-client-id"
+```
+
+支持 `#` 注释，键名 `CLIENT_ID` 或 `AZURE_CLIENT_ID` 均可。
+
+### 方式二：环境变量（覆盖文件配置）
+
+```bash
+AZURE_CLIENT_ID="your-app-client-id" ./zig-out/bin/outlook-mcp
+```
+
+两种方式都不设时进入**诊断模式**，仅提供 `ping` tool。
+
+### 首次登录
+
+运行后终端会显示：
+
+```
+🔐 请打开浏览器访问:
+    https://microsoft.com/devicelogin
+
+   验证码: ABC123XYZ
+```
+
+在浏览器中打开链接，输入验证码，用你的 Microsoft 账号授权即可。
+登录成功后 Token 缓存到 `~/.cache/outlook-mcp/token.json`，下次自动复用。
+
+### 获取 Client ID
+
+去 [Azure Portal → App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)：
+
+1. **+ New registration**
+2. 选 **"Accounts in any organizational directory"**
+3. 平台选 **"Mobile and desktop applications"**
+4. Redirect URI: `https://login.microsoftonline.com/common/oauth2/nativeclient`
+5. 注册后复制 **Application (client) ID**
 
 ## 注册到 Agent
 
-**Claude Code** — 添加到 `.claude/settings.local.json`：
+```bash
+# Reasonix
+add_mcp_server(
+    name="outlook",
+    transport="stdio",
+    command="/path/to/outlook-mcp"
+)
+```
 
 ```json
+// Claude Code — .claude/settings.local.json
 {
   "mcpServers": {
     "outlook": {
