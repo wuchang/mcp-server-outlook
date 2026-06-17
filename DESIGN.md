@@ -140,9 +140,4 @@ microsoft-graph-mcp-zig/
         └── task_handlers.zig
 ```
 
-## Future Considerations
 
-- **Rate limiting** — Graph API has per-app and per-user throttle limits. Consider exponential backoff in `graph/client.zig`.
-- **Token encryption** — The local token cache contains refresh tokens. Encrypt with machine-local key (DPAPI / Keychain) for production.
-- **Multi-account** — Support multiple Azure tenant configurations via named profiles in config file.
-- **CI/CD** — GitHub Actions: `zig build test` on push, release binaries on tag.
