@@ -36,11 +36,23 @@ Works with **any MCP-compatible agent**: Claude Code, Claude Desktop, Reasonix, 
 
 ## Quick Start
 
-### 1. Download / Build
+> **Note:** This project is a submodule of the [notebooks](https://github.com/wuchang/notebooks) monorepo during development. Once the GitHub repo is created, update the submodule URL and replace the instructions below.
+
+### 1. Clone
 
 ```bash
-# Build from source (requires Zig 0.14+)
+# As submodule
+git clone git@github.com:wuchang/notebooks.git
+cd notebooks
+git submodule update --init microsoft-graph-mcp-zig
+
+# Or standalone (after GitHub repo is created)
 git clone https://github.com/<your-org>/microsoft-graph-mcp-zig.git
+```
+
+### 2. Build (requires Zig 0.14+)
+
+```bash
 cd microsoft-graph-mcp-zig
 zig build -Doptimize=ReleaseSafe
 
