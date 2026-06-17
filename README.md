@@ -36,7 +36,7 @@ Works with **any MCP-compatible agent**: Claude Code, Claude Desktop, Reasonix, 
 
 ## Quick Start
 
-> **Note:** This project is a submodule of the [notebooks](https://github.com/wuchang/notebooks) monorepo during development. Once the GitHub repo is created, update the submodule URL and replace the instructions below.
+> **Note:** This project is a submodule under `microsoft/microsoft-graph-mcp-zig/` in the [notebooks](https://github.com/wuchang/notebooks) monorepo during development. Once the GitHub repo is created, update the submodule URL and replace the instructions below.
 
 ### 1. Clone
 
