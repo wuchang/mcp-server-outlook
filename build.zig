@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.linkSystemLibrary("ssl", .{});
     exe_mod.linkSystemLibrary("crypto", .{});
 
-    const exe = b.addExecutable(.{ .name = "outlook-mcp", .root_module = exe_mod });
+    const exe = b.addExecutable(.{ .name = "mcp-server-outlook", .root_module = exe_mod });
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

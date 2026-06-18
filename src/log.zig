@@ -2,9 +2,9 @@
 ///
 /// 级别：debug < info < warn < err
 /// 环境变量 OUTLOOK_LOG 控制级别，默认 "info"
-///   OUTLOOK_LOG=debug ./outlook-mcp   # 详细日志
-///   OUTLOOK_LOG=warn  ./outlook-mcp   # 仅警告+
-///   OUTLOOK_LOG=off   ./outlook-mcp   # 完全静默
+///   OUTLOOK_LOG=debug ./mcp-server-outlook   # 详细日志
+///   OUTLOOK_LOG=warn  ./mcp-server-outlook   # 仅警告+
+///   OUTLOOK_LOG=off   ./mcp-server-outlook   # 完全静默
 
 const std = @import("std");
 const c = @cImport({

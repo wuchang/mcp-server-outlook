@@ -57,7 +57,7 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    log.info("starting outlook-mcp v0.1.0", .{});
+    log.info("starting mcp-server-outlook v0.1.0", .{});
 
     // Initialize TLS
     tls.init() catch |e| { log.err("TLS init failed: {s}", .{@errorName(e)}); return e; };

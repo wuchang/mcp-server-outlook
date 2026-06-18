@@ -1,9 +1,32 @@
 # Microsoft Graph MCP (Zig)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Zig](https://img.shields.io/badge/Zig-0.16-orange)](https://ziglang.org)
 
-一个 Zig 实现的 MCP Server，通过 Microsoft Graph API 操作 Outlook 邮件、日历和待办任务。
-编译为单二进制，配合任何支持 MCP 协议的 AI agent 使用。
+一个 Zig 编写的 MCP Server，通过 Microsoft Graph API 操作 Outlook 邮件、日历和待办任务。
+编译为单二进制（~2MB），配合任何支持 MCP 协议的 AI agent 使用。
+
+## 安装
+
+### 从源码构建
+
+```bash
+# 系统依赖
+sudo apt install libssl-dev   # Debian/Ubuntu
+# 或 brew install openssl     # macOS
+# 或 pacman -S openssl        # Arch
+
+# 需要 Zig 0.16+
+zig build -Doptimize=ReleaseSafe
+```
+
+产物在 `zig-out/bin/mcp-server-outlook`。
+
+### 验证
+
+```bash
+./zig-out/bin/mcp-server-outlook --help
+```
 
 ## 功能
 
@@ -23,13 +46,6 @@
 | | `search_emails` | 搜索邮件 |
 | | `get_unread_count` | 未读数 |
 
-## 构建
-
-```bash
-# 需要 zig 0.16+ 和系统 OpenSSL（libssl + libcrypto）
-zig build -Doptimize=ReleaseSafe
-```
-
 ## 配置
 
 ### 方式一：配置文件（推荐）
@@ -45,7 +61,7 @@ CLIENT_ID = "your-app-client-id"
 ### 方式二：环境变量（覆盖文件配置）
 
 ```bash
-AZURE_CLIENT_ID="your-app-client-id" ./zig-out/bin/outlook-mcp
+AZURE_CLIENT_ID="your-app-client-id" ./zig-out/bin/mcp-server-outlook
 ```
 
 两种方式都不设时进入**诊断模式**，仅提供 `ping` tool。
@@ -62,7 +78,7 @@ AZURE_CLIENT_ID="your-app-client-id" ./zig-out/bin/outlook-mcp
 ```
 
 在浏览器中打开链接，输入验证码，用你的 Microsoft 账号授权即可。
-登录成功后 Token 缓存到 `~/.cache/outlook-mcp/token.json`，下次自动复用。
+登录成功后 Token 缓存到 `~/.config/outlook-mcp/token.json`，下次启动自动复用，无需重新登录。
 
 ### 获取 Client ID
 
@@ -81,7 +97,7 @@ AZURE_CLIENT_ID="your-app-client-id" ./zig-out/bin/outlook-mcp
 add_mcp_server(
     name="outlook",
     transport="stdio",
-    command="/path/to/outlook-mcp"
+    command="/path/to/mcp-server-outlook"
 )
 ```
 
@@ -90,10 +106,33 @@ add_mcp_server(
 {
   "mcpServers": {
     "outlook": {
-      "command": "/path/to/outlook-mcp"
+      "command": "/path/to/mcp-server-outlook"
     }
   }
 }
+```
+
+**OpenClaw**:
+
+```bash
+# 方式一：环境变量（无需配置文件）
+openclaw mcp set outlook \
+  '{"command":"/path/to/mcp-server-outlook","env":{"AZURE_CLIENT_ID":"your-client-id"}}'
+
+# 方式二：配置文件
+openclaw mcp set outlook \
+  '{"command":"/path/to/mcp-server-outlook"}'
+# 然后确保 ~/.config/outlook-mcp/config 里已写好 CLIENT_ID
+```
+
+## 测试
+
+```bash
+# 单元测试（Graph client mock）
+zig build test
+
+# 集成测试（需要 AZURE_CLIENT_ID 或已配置 ~/.config/outlook-mcp/config）
+python3 test_mcp_client.py
 ```
 
 ## License

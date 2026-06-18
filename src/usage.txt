@@ -1,6 +1,6 @@
-outlook-mcp — Microsoft Graph MCP Server
+mcp-server-outlook — Microsoft Graph MCP Server
 
-使用: outlook-mcp [--help | -h | --logout | -l]
+使用: mcp-server-outlook [--help | -h | --logout | -l]
 
 选项:
   --help, -h     显示此帮助
@@ -21,14 +21,14 @@ Token 缓存:
 
 日志示例:
   # INFO 级别（默认）— 显示关键步骤
-  ./outlook-mcp
-  >    +0.001 [INFO] starting outlook-mcp v0.1.0
+  ./mcp-server-outlook
+  >    +0.001 [INFO] starting mcp-server-outlook v0.1.0
   >    +0.005 [INFO] attempting authentication (client_id=xxx)
   >    +0.842 [INFO] device code obtained, polling every 5s
   >    +5.100 [INFO] token obtained after 1 polls
 
   # DEBUG 级别 — 显示 DNS、TLS、HTTP 请求细节
-  OUTLOOK_LOG=debug ./outlook-mcp
+  OUTLOOK_LOG=debug ./mcp-server-outlook
   >    +0.042 [DEBG] DNS resolved login.microsoftonline.com:443
   >    +0.158 [DEBG] HTTPS request to login.microsoftonline.com — 312 bytes sent
   >    +0.321 [DEBG] HTTPS response from login.microsoftonline.com — 1024 bytes
@@ -36,7 +36,10 @@ Token 缓存:
 
 Agent 注册（Stdio 模式）:
   Reasonix:  add_mcp_server(name="outlook", transport="stdio",
-              command="/path/to/outlook-mcp")
+              command="/path/to/mcp-server-outlook")
 
   Claude Code (.claude/settings.local.json):
-    {"mcpServers": {"outlook": {"command": "/path/to/outlook-mcp"}}}
+    {"mcpServers": {"outlook": {"command": "/path/to/mcp-server-outlook"}}}
+
+  OpenClaw (~/.openclaw/mcp.json 或 Web UI Settings → MCP):
+    {"mcpServers": {"outlook": {"command": "/path/to/mcp-server-outlook"}}}

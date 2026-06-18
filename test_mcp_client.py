@@ -6,7 +6,7 @@ import json
 import sys
 import os
 
-BINARY = os.path.join(os.path.dirname(__file__), "zig-out", "bin", "outlook-mcp")
+BINARY = os.path.join(os.path.dirname(__file__), "zig-out", "bin", "mcp-server-outlook")
 
 
 def send(proc, msg):
@@ -31,7 +31,7 @@ def test(proc, label, msg):
 
 def main():
     print("=" * 60)
-    print("outlook-mcp 功能测试")
+    print("mcp-server-outlook 功能测试")
     print(f"binary: {BINARY}")
     print(f"env:    AZURE_CLIENT_ID={'set' if os.getenv('AZURE_CLIENT_ID') else 'NOT SET'}")
     print("=" * 60)

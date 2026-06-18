@@ -153,7 +153,7 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
 /// Simple GET
 pub fn get(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []const u8) ![]const u8 {
     const req = try std.fmt.allocPrint(allocator,
-        "GET {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: outlook-mcp-zig/0.1.0\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
+        "GET {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: mcp-server-outlook/0.1.0\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
         .{ path, host }
     );
     defer allocator.free(req);
@@ -163,7 +163,7 @@ pub fn get(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []co
 /// POST with form body
 pub fn postForm(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []const u8, body: []const u8) ![]const u8 {
     const req = try std.fmt.allocPrint(allocator,
-        "POST {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: outlook-mcp-zig/0.1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\nAccept: application/json\r\nConnection: close\r\n\r\n{s}",
+        "POST {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: mcp-server-outlook/0.1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\nAccept: application/json\r\nConnection: close\r\n\r\n{s}",
         .{ path, host, body.len, body }
     );
     defer allocator.free(req);
@@ -195,7 +195,7 @@ pub fn sendWithAuth(allocator: std.mem.Allocator, method: []const u8, host: []co
     const content_type = if (body_json != null) "Content-Type: application/json\r\n" else "";
 
     const req = try std.fmt.allocPrint(allocator,
-        "{s} {s} HTTP/1.1\r\nHost: {s}\r\n{s}User-Agent: outlook-mcp-zig/0.1.0\r\nAccept: application/json\r\n{s}{s}Connection: close\r\n\r\n{s}",
+        "{s} {s} HTTP/1.1\r\nHost: {s}\r\n{s}User-Agent: mcp-server-outlook/0.1.0\r\nAccept: application/json\r\n{s}{s}Connection: close\r\n\r\n{s}",
         .{
             method, path, host,
             auth_header,
