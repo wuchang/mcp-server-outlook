@@ -4,7 +4,7 @@
 [![Zig](https://img.shields.io/badge/Zig-0.16-orange)](https://ziglang.org)
 
 一个 Zig 编写的 MCP Server，通过 Microsoft Graph API 操作 Outlook 邮件、日历和待办任务。
-编译为单二进制（~2MB），配合任何支持 MCP 协议的 AI agent 使用。
+编译为单二进制（~750K），配合任何支持 MCP 协议的 AI agent 使用。
 
 ## 安装
 
