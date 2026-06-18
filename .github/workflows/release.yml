@@ -20,16 +20,36 @@ jobs:
             artifact: mcp-server-outlook-macos-x86_64
             ext: ""
             dep: brew install openssl
+          - os: windows-latest
+            artifact: mcp-server-outlook-windows-x86_64.exe
+            ext: .exe
+            dep: null
     runs-on: ${{ matrix.target.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
-      - run: ${{ matrix.target.dep }}
-      - run: zig build -Doptimize=ReleaseSafe
-      - run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
+      - name: Install deps (Unix)
+        if: runner.os != 'Windows'
+        run: ${{ matrix.target.dep }}
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install openssl:x64-windows-static
+          echo "VCPKG_OPENSSL_DIR=$($env:VCPKG_INSTALLATION_ROOT)\installed\x64-windows-static" >> $env:GITHUB_ENV
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: zig build -Doptimize=ReleaseSafe --openssl-dir "$env:VCPKG_OPENSSL_DIR"
+      - if: runner.os != 'Windows'
+        run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
       - run: mv zig-out/bin/mcp-server-outlook${{ matrix.target.ext }} ${{ matrix.target.artifact }}
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target.artifact }}
