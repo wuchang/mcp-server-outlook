@@ -12,8 +12,19 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe_mod.link_libc = true;
-    exe_mod.linkSystemLibrary("ssl", .{});
-    exe_mod.linkSystemLibrary("crypto", .{});
+
+    const openssl_dir = b.option([]const u8, "openssl-dir", "OpenSSL installation directory (include/ and lib/ subdirs expected)");
+    if (openssl_dir) |dir| {
+        exe_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ dir, "include" }) });
+        exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
+    }
+    if (target.result.os.tag == .windows) {
+        exe_mod.linkSystemLibrary("libssl", .{});
+        exe_mod.linkSystemLibrary("libcrypto", .{});
+    } else {
+        exe_mod.linkSystemLibrary("ssl", .{});
+        exe_mod.linkSystemLibrary("crypto", .{});
+    }
 
     const exe = b.addExecutable(.{ .name = "mcp-server-outlook", .root_module = exe_mod });
     b.installArtifact(exe);

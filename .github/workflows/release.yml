@@ -37,8 +37,13 @@ jobs:
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
         run: choco install openssl -y --no-progress
-      - name: Build
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
         run: zig build -Doptimize=ReleaseSafe
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: zig build -Doptimize=ReleaseSafe -Dopenssl-dir="C:\Program Files\OpenSSL-Win64"
       - name: Strip binary
         if: runner.os != 'Windows'
         run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
