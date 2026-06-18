@@ -1,8 +1,10 @@
-/// Outlook MCP Server — Zig Implementation
-/// Microsoft Graph API via MCP protocol (JSON-RPC 2.0 over stdio)
+/// Outlook MCP Server — Zig 全平台版
 
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @cImport({
+    @cDefine("__STDC_LIB_EXT1__", "0");
+    @cDefine("__STDC_WANT_SECURE_LIB__", "0");
     @cInclude("stdlib.h");
     @cInclude("stdio.h");
     @cInclude("sys/stat.h");
@@ -10,281 +12,160 @@ const c = @cImport({
 const log = @import("log.zig");
 const config_mod = @import("config.zig");
 const tls = @import("tls.zig");
-
 const mcp = @import("mcp.zig");
 const GraphClient = @import("graph/client.zig").GraphClient;
-
 const calendar_handlers = @import("handlers/calendar.zig");
 const mail_handlers = @import("handlers/mail.zig");
 const task_handlers = @import("handlers/tasks.zig");
-
 const auth_oauth = @import("auth/oauth.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     log.init();
 
-    // Parse argv: --help, --logout (via /proc/self/cmdline, cross-compile friendly)
-    {
-        const raw_fd = std.os.linux.open("/proc/self/cmdline", .{}, 0);
-        if (raw_fd <= std.math.maxInt(i32)) {
-            const fd: i32 = @intCast(raw_fd);
-            defer _ = std.os.linux.close(fd);
-            var cmd_buf: [4096]u8 = undefined;
-            const n = std.os.linux.read(fd, &cmd_buf, cmd_buf.len);
-            if (n > 0) {
-                const args = cmd_buf[0..n];
-                var i: usize = 0;
-                while (i < args.len and args[i] != 0) i += 1;
-                i += 1;
-                const a1 = i;
-                while (i < args.len and args[i] != 0) i += 1;
-                if (i > a1) {
-                    const arg1 = args[a1..i];
-                    if (std.mem.eql(u8, arg1, "--help") or std.mem.eql(u8, arg1, "-h")) {
-                        printUsage();
-                        return;
-                    }
-                    if (std.mem.eql(u8, arg1, "--logout") or std.mem.eql(u8, arg1, "-l")) {
-                        doLogout();
-                        return;
-                    }
-                }
-            }
+    // ── 跨平台 args ──
+    // 修改点：Windows 上 vector 是 []const u16，Posix 是 []const [*:0]u8
+    if (comptime builtin.target.os.tag == .windows) {
+        // Windows: 用 Args.Iterator 处理 WTF-16 → UTF-8 转换
+        if (init.args.vector.len > 0) {
+            var arg_it = std.process.Args.Iterator{ .inner = .{ .allocator = std.heap.page_allocator, .cmd_line = init.args.vector, .buffer = &.{} } };
+            defer arg_it.deinit();
+            _ = arg_it.next();
+            if (arg_it.next()) |a| { handleArg(a); }
+        }
+    } else {
+        // Posix: args 是 [*:0]u8 数组
+        const vec = init.args.vector;
+        if (vec.len > 1) {
+            const arg1 = std.mem.sliceTo(vec[1], 0);
+            handleArg(arg1);
         }
     }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = arena.allocator();
+    const a = arena.allocator();
 
     log.info("starting mcp-server-outlook v0.1.0", .{});
-
-    // Initialize TLS
-    tls.init() catch |e| { log.err("TLS init failed: {s}", .{@errorName(e)}); return e; };
+    tls.init() catch |e| { log.err("TLS: {s}", .{@errorName(e)}); return e; };
     defer tls.deinit();
-    log.debug("TLS initialized", .{});
 
-    // Load config
-    const config = config_mod.Config.load(allocator) catch |err| switch (err) {
+    const config = config_mod.Config.load(a) catch |err| switch (err) {
         error.MissingClientId => {
-            // Auto-create config template
-            const home_env = c.getenv("HOME") orelse c.getenv("USERPROFILE");
-            const home = if (home_env) |h| std.mem.sliceTo(h, 0) else ".";
-            const config_dir = try std.fmt.allocPrint(allocator, "{s}/.config/outlook-mcp", .{home});
-            const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{config_dir});
-            defer allocator.free(config_dir);
-            defer allocator.free(config_path);
-
-            // Create config dir using C mkdir
-            const dir_z = try allocator.alloc(u8, config_dir.len + 1);
-            defer allocator.free(dir_z);
-            @memcpy(dir_z[0..config_dir.len], config_dir);
-            dir_z[config_dir.len] = 0;
-            _ = c.mkdir(dir_z.ptr, 0o755); // ignore if exists
-
-            // Check if config already exists, create template if not
-            const cfg_z = try allocator.alloc(u8, config_path.len + 1);
-            defer allocator.free(cfg_z);
-            @memcpy(cfg_z[0..config_path.len], config_path);
-            cfg_z[config_path.len] = 0;
-
-            const existing = c.fopen(cfg_z.ptr, "r");
-            if (existing == null) {
-                const fw = c.fopen(cfg_z.ptr, "w");
-                if (fw) |fw_ptr| {
-                    const tmpl =
-                        "# Outlook MCP 配置文件\n" ++
-                        "# 替换下面的 client id 为你自己的 Azure App Registration\n" ++
-                        "CLIENT_ID = \"your-app-client-id\"\n";
-                    _ = c.fwrite(tmpl.ptr, 1, tmpl.len, fw_ptr);
-                    _ = c.fclose(fw_ptr);
-                }
-            } else {
-                _ = c.fclose(existing);
-            }
-
-            std.debug.print(
-                \\⚠️  未找到 AZURE_CLIENT_ID
-                \\
-                \\  已创建配置模板：
-                \\    {s}
-                \\
-                \\  请编辑该文件，将 your-app-client-id 替换为你的真实 Client ID。
-                \\
-                \\  或用环境变量：
-                \\    AZURE_CLIENT_ID="your-app-client-id" ./outlook-mcp
-                \\
-                \\  进入诊断模式（仅 ping tool）
-                \\
-            , .{config_path});
-            return runDiagnosticServer(allocator);
+            createConfigTemplate() catch {};
+            log.warn("config template created, edit and re-run", .{});
+            return runDiagnosticServer(a);
         },
         else => |e| return e,
     };
-    defer {
-        allocator.free(config.client_id);
-        allocator.free(config.token_cache_path);
-    }
+    defer { a.free(config.client_id); a.free(config.token_cache_path); }
 
-    // Get access token
-    log.info("attempting authentication (client_id={s})", .{config.client_id});
-    const token = auth_oauth.getAccessToken(allocator, &config) catch |err| {
-        log.err("auth failed: {s} — falling back to diagnostic mode", .{@errorName(err)});
-        return runDiagnosticServer(allocator);
+    log.info("auth starting (client_id={s})", .{config.client_id});
+    const token = auth_oauth.getAccessToken(a, &config) catch |err| {
+        log.err("auth failed: {s}", .{@errorName(err)});
+        return runDiagnosticServer(a);
     };
-    log.info("authenticated successfully, expires in {d}s", .{token.expires_in});
+    log.info("authenticated, expires in {d}s", .{token.expires_in});
 
-    // Create Graph client
-    var graph_client = GraphClient.init(allocator, token.access_token);
+    var gc = GraphClient.init(a, token.access_token);
+    calendar_handlers.setClient(&gc);
+    mail_handlers.setClient(&gc);
+    task_handlers.setClient(&gc);
 
-    // Set global clients for handlers
-    calendar_handlers.setClient(&graph_client);
-    mail_handlers.setClient(&graph_client);
-    task_handlers.setClient(&graph_client);
-
-    // Create and run MCP server
-    var server = mcp.Server.init(allocator, "outlook", "0.1.0");
+    var server = mcp.Server.init(a, "outlook", "0.1.0");
     defer server.deinit();
 
+    // 注册 13 个 tool
     try registerTools(&server);
-    log.info("starting MCP server with {d} tools", .{server.tools.count()});
+    log.info("starting MCP server with 13 tools", .{});
     try server.run();
 }
 
-/// Register all 13 MCP tools
 fn registerTools(server: *mcp.Server) !void {
-    try server.addTool(.{
-        .name = "list_events",
-        .description = "查询未来 N 天的日历事件（默认 7 天）",
-        .input_schema = makeSchema(.{}),
-        .handler = calendar_handlers.list_events.handler,
-    });
-    try server.addTool(.{
-        .name = "query_events",
-        .description = "查询任意日期范围的事件（支持过去任意时间段）",
-        .input_schema = makeSchema(.{}),
-        .handler = calendar_handlers.query_events.handler,
-    });
-    try server.addTool(.{
-        .name = "search_events",
-        .description = "按关键词搜索日历事件标题",
-        .input_schema = makeSchema(.{}),
-        .handler = calendar_handlers.search_events.handler,
-    });
-    try server.addTool(.{
-        .name = "create_event",
-        .description = "创建新的日历事件",
-        .input_schema = makeSchema(.{}),
-        .handler = calendar_handlers.create_event.handler,
-    });
-    try server.addTool(.{
-        .name = "list_emails",
-        .description = "列出收件箱最新邮件",
-        .input_schema = makeSchema(.{}),
-        .handler = mail_handlers.list_emails.handler,
-    });
-    try server.addTool(.{
-        .name = "send_email",
-        .description = "发送邮件",
-        .input_schema = makeSchema(.{}),
-        .handler = mail_handlers.send_email.handler,
-    });
-    try server.addTool(.{
-        .name = "search_emails",
-        .description = "按关键词搜索邮件",
-        .input_schema = makeSchema(.{}),
-        .handler = mail_handlers.search_emails.handler,
-    });
-    try server.addTool(.{
-        .name = "get_unread_count",
-        .description = "获取未读邮件数量",
-        .input_schema = makeSchema(.{}),
-        .handler = mail_handlers.get_unread_count.handler,
-    });
-    try server.addTool(.{
-        .name = "list_task_lists",
-        .description = "列出所有待办任务清单",
-        .input_schema = makeSchema(.{}),
-        .handler = task_handlers.list_task_lists.handler,
-    });
-    try server.addTool(.{
-        .name = "list_tasks",
-        .description = "列出指定清单中的待办任务",
-        .input_schema = makeSchema(.{}),
-        .handler = task_handlers.list_tasks.handler,
-    });
-    try server.addTool(.{
-        .name = "create_task",
-        .description = "在指定清单中创建新任务",
-        .input_schema = makeSchema(.{}),
-        .handler = task_handlers.create_task.handler,
-    });
-    try server.addTool(.{
-        .name = "complete_task",
-        .description = "将任务标记为已完成",
-        .input_schema = makeSchema(.{}),
-        .handler = task_handlers.complete_task.handler,
-    });
-    try server.addTool(.{
-        .name = "delete_task",
-        .description = "删除指定任务",
-        .input_schema = makeSchema(.{}),
-        .handler = task_handlers.delete_task.handler,
-    });
+    const s = mcp.emptySchema();
+    try server.addTool(.{ .name = "list_events",       .description = "未来 N 天日历事件",     .input_schema = s, .handler = calendar_handlers.list_events.handler });
+    try server.addTool(.{ .name = "query_events",      .description = "查询日期范围的事件",     .input_schema = s, .handler = calendar_handlers.query_events.handler });
+    try server.addTool(.{ .name = "search_events",     .description = "按标题搜索事件",         .input_schema = s, .handler = calendar_handlers.search_events.handler });
+    try server.addTool(.{ .name = "create_event",      .description = "创建日历事件",           .input_schema = s, .handler = calendar_handlers.create_event.handler });
+    try server.addTool(.{ .name = "list_emails",       .description = "列出收件箱邮件",         .input_schema = s, .handler = mail_handlers.list_emails.handler });
+    try server.addTool(.{ .name = "send_email",        .description = "发送邮件",               .input_schema = s, .handler = mail_handlers.send_email.handler });
+    try server.addTool(.{ .name = "search_emails",     .description = "搜索邮件",               .input_schema = s, .handler = mail_handlers.search_emails.handler });
+    try server.addTool(.{ .name = "get_unread_count",  .description = "未读邮件数量",           .input_schema = s, .handler = mail_handlers.get_unread_count.handler });
+    try server.addTool(.{ .name = "list_task_lists",   .description = "列出任务清单",           .input_schema = s, .handler = task_handlers.list_task_lists.handler });
+    try server.addTool(.{ .name = "list_tasks",        .description = "列出清单中任务",         .input_schema = s, .handler = task_handlers.list_tasks.handler });
+    try server.addTool(.{ .name = "create_task",       .description = "创建任务",               .input_schema = s, .handler = task_handlers.create_task.handler });
+    try server.addTool(.{ .name = "complete_task",     .description = "完成任务",               .input_schema = s, .handler = task_handlers.complete_task.handler });
+    try server.addTool(.{ .name = "delete_task",       .description = "删除任务",               .input_schema = s, .handler = task_handlers.delete_task.handler });
 }
 
-fn makeSchema(fields: anytype) std.json.Value {
-    _ = fields;
-    return .{
-        .object = blk: {
-            var obj = std.json.ObjectMap.empty;
-            obj.put(std.heap.page_allocator, "type", .{ .string = "object" }) catch {};
-            break :blk obj;
-        },
-    };
+fn handleArg(arg: []const u8) void {
+    if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) { printUsage(); std.process.exit(0); }
+    if (std.mem.eql(u8, arg, "--logout") or std.mem.eql(u8, arg, "-l")) { doLogout(); std.process.exit(0); }
 }
 
-fn printUsage() void {
-    const msg = @embedFile("usage.txt");
-    _ = std.os.linux.write(std.posix.STDOUT_FILENO, msg.ptr, msg.len);
+fn getHome() []const u8 {
+    if (comptime builtin.target.os.tag == .windows) {
+        const d = c.getenv("USERPROFILE");
+        return if (d) |p| std.mem.sliceTo(p, 0) else ".";
+    } else {
+        const d = c.getenv("HOME");
+        return if (d) |p| std.mem.sliceTo(p, 0) else ".";
+    }
+}
+
+fn createConfigTemplate() !void {
+    const home = getHome();
+    const base = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/.config/outlook-mcp", .{home});
+    defer std.heap.page_allocator.free(base);
+    const path = try std.fmt.allocPrint(std.heap.page_allocator, "{s}/config", .{base});
+    defer std.heap.page_allocator.free(path);
+    const bz = try az(std.heap.page_allocator, base);
+    defer std.heap.page_allocator.free(bz);
+    if (builtin.target.os.tag == .windows) {
+        _ = c.mkdir(@as([*:0]const u8, @ptrCast(bz.ptr)));
+    } else {
+        _ = c.mkdir(@as([*:0]const u8, @ptrCast(bz.ptr)), 0o755);
+    }
+    const pz = try az(std.heap.page_allocator, path);
+    defer std.heap.page_allocator.free(pz);
+    const f = c.fopen(@as([*:0]const u8, @ptrCast(pz.ptr)), "r");
+    if (f == null) {
+        const fw = c.fopen(@as([*:0]const u8, @ptrCast(pz.ptr)), "w") orelse return;
+        const t = "# Outlook MCP\nCLIENT_ID = \"your-app-client-id\"\n";
+        _ = c.fwrite(t.ptr, 1, t.len, fw); _ = c.fclose(fw);
+    } else { _ = c.fclose(f); }
+}
+
+fn az(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
+    const z = try alloc.alloc(u8, s.len + 1);
+    @memcpy(z[0..s.len], s); z[s.len] = 0; return z;
 }
 
 fn doLogout() void {
-    // Delete token cache file
-    const home_c2 = c.getenv("HOME") orelse c.getenv("USERPROFILE");
-    const home = if (home_c2) |h| std.mem.sliceTo(h, 0) else ".";
-    const config_dir = std.fmt.allocPrint(std.heap.page_allocator, "{s}/.config/outlook-mcp", .{home}) catch return;
-    defer std.heap.page_allocator.free(config_dir);
-    const token_path = std.fmt.allocPrint(std.heap.page_allocator, "{s}/token.json", .{config_dir}) catch return;
-    defer std.heap.page_allocator.free(token_path);
-
-    const token_z = std.heap.page_allocator.alloc(u8, token_path.len + 1) catch return;
-    defer std.heap.page_allocator.free(token_z);
-    @memcpy(token_z[0..token_path.len], token_path);
-    token_z[token_path.len] = 0;
-    const ret = c.remove(token_z.ptr);
-    if (ret == 0) {
-        std.debug.print("✅ 已注销 — token 缓存文件已删除\n", .{});
-    } else {
-        std.debug.print("ℹ️  没有已保存的登录凭证\n", .{});
-    }
+    const b = try_or_ret(std.fmt.allocPrint(std.heap.page_allocator, "{s}/.config/outlook-mcp", .{getHome()}));
+    defer std.heap.page_allocator.free(b);
+    const tp = try_or_ret(std.fmt.allocPrint(std.heap.page_allocator, "{s}/token.json", .{b}));
+    defer std.heap.page_allocator.free(tp);
+    const z = az(std.heap.page_allocator, tp) catch return;
+    defer std.heap.page_allocator.free(z);
+    if (c.remove(@as([*:0]const u8, @ptrCast(z.ptr))) == 0) {
+        std.debug.print("✅ logout ok\n", .{});
+    } else { std.debug.print("ℹ️  no token cache\n", .{}); }
 }
 
-fn runDiagnosticServer(allocator: std.mem.Allocator) !void {
-    std.debug.print("🔧 诊断模式启动（仅 ping tool，无 Graph API）\n", .{});
-    var server = mcp.Server.init(allocator, "outlook-diagnostic", "0.1.0");
-    defer server.deinit();
+fn try_or_ret(v: anyerror![]const u8) []const u8 {
+    return v catch return "";
+}
 
-    try server.addTool(.{
-        .name = "ping",
-        .description = "Health check — returns 'pong'",
-        .input_schema = makeSchema(.{}),
-        .handler = struct {
-            fn h(_: ?std.json.Value, alloc: std.mem.Allocator) mcp.ToolError!mcp.ToolResult {
-                return mcp.ToolResult{ .text = try std.fmt.allocPrint(alloc, "pong — 完整功能需设置 AZURE_CLIENT_ID\n  写入 ~/.config/outlook-mcp/config：\n    CLIENT_ID = \"your-app-client-id\"\n  或环境变量：AZURE_CLIENT_ID=\"...\" ./outlook-mcp", .{}) };
-            }
-        }.h,
+fn printUsage() void { std.debug.print("{s}", .{@embedFile("usage.txt")}); }
+
+fn runDiagnosticServer(alloc: std.mem.Allocator) !void {
+    log.info("diagnostic mode (ping only)", .{});
+    var sv = mcp.Server.init(alloc, "outlook-diagnostic", "0.1.0");
+    defer sv.deinit();
+    try sv.addTool(.{ .name = "ping", .description = "health check", .input_schema = mcp.emptySchema(),
+        .handler = struct { fn h(_: ?std.json.Value, a2: std.mem.Allocator) mcp.ToolError!mcp.ToolResult {
+            return .{ .text = try std.fmt.allocPrint(a2, "pong", .{}) };
+        } }.h,
     });
-
-    try server.run();
+    try sv.run();
 }

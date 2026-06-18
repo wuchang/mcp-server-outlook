@@ -1,7 +1,9 @@
-/// Token cache — persist refresh token to local file via libc
+/// Token 持久化 — 跨平台文件操作
+/// 修改点：移除 std.fs.cwd()（Zig 0.16 不存在），改用 C fopen/fwrite
 
 const std = @import("std");
 const c = @cImport({
+    @cDefine("__STDC_LIB_EXT1__", "0");
     @cInclude("stdio.h");
     @cInclude("sys/stat.h");
 });
@@ -15,17 +17,21 @@ pub const TokenCache = struct {
     }
 
     pub fn load(self: *const TokenCache) !?TokenData {
-        const path_z = try self.allocator.alloc(u8, self.path.len + 1);
+        const path_z = try allocatorZ(self.allocator, self.path);
         defer self.allocator.free(path_z);
-        @memcpy(path_z[0..self.path.len], self.path);
-        path_z[self.path.len] = 0;
 
         const f = c.fopen(@as([*:0]const u8, @ptrCast(path_z.ptr)), "r");
         if (f == null) return null;
         defer _ = c.fclose(f);
 
         var buf: [1024 * 16]u8 = undefined;
-        const n = c.fread(&buf, 1, buf.len, f);
+        var n: usize = 0;
+        while (n < buf.len) {
+            const ch = c.fgetc(f);
+            if (ch < 0) break;
+            buf[n] = @intCast(ch);
+            n += 1;
+        }
         if (n <= 0) return null;
         const content = buf[0..@as(usize, @intCast(n))];
 
@@ -45,21 +51,20 @@ pub const TokenCache = struct {
     }
 
     pub fn save(self: *const TokenCache, data: TokenData) !void {
-        const path_z = try self.allocator.alloc(u8, self.path.len + 1);
+        const path_z = try allocatorZ(self.allocator, self.path);
         defer self.allocator.free(path_z);
-        @memcpy(path_z[0..self.path.len], self.path);
-        path_z[self.path.len] = 0;
 
-        // mkdir -p
-        if (std.mem.lastIndexOfScalar(u8, self.path, '/')) |slash| {
-            var dir_z = try self.allocator.alloc(u8, slash + 1);
+        // mkdir -p（跨平台：目录分隔符统一用 /，Windows 也支持）
+        const slash = std.mem.lastIndexOfScalar(u8, self.path, '/') orelse std.mem.lastIndexOfScalar(u8, self.path, '\\');
+        if (slash) |s| {
+            var dir_z = try self.allocator.alloc(u8, s + 1);
             defer self.allocator.free(dir_z);
-            @memcpy(dir_z[0..slash], self.path[0..slash]);
-            dir_z[slash] = 0;
+            @memcpy(dir_z[0..s], self.path[0..s]);
+            dir_z[s] = 0;
             _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_z.ptr)), 0o755);
         }
 
-        // Build JSON content
+        // 构建 JSON
         var lines = std.ArrayList(u8).empty;
         defer lines.deinit(self.allocator);
         try lines.appendSlice(self.allocator, "{\"refresh_token\":\"");
@@ -84,10 +89,8 @@ pub const TokenCache = struct {
     }
 
     pub fn clear(self: *const TokenCache) void {
-        const path_z = self.allocator.alloc(u8, self.path.len + 1) catch return;
+        const path_z = allocatorZ(self.allocator, self.path) catch return;
         defer self.allocator.free(path_z);
-        @memcpy(path_z[0..self.path.len], self.path);
-        path_z[self.path.len] = 0;
         _ = c.remove(@as([*:0]const u8, @ptrCast(path_z.ptr)));
     }
 };
@@ -97,3 +100,10 @@ pub const TokenData = struct {
     access_token: ?[]const u8 = null,
     expires_at: ?i64 = null,
 };
+
+fn allocatorZ(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const z = try allocator.alloc(u8, path.len + 1);
+    @memcpy(z[0..path.len], path);
+    z[path.len] = 0;
+    return z;
+}

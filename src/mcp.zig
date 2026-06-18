@@ -12,6 +12,13 @@ pub const Tool = struct {
     handler: ToolHandler,
 };
 
+/// 创建一个空的 input_schema（后续可补全）
+pub fn emptySchema() std.json.Value {
+    var obj = std.json.ObjectMap.empty;
+    obj.put(std.heap.page_allocator, "type", .{ .string = "object" }) catch {};
+    return .{ .object = obj };
+}
+
 pub const ToolResult = struct {
     text: []const u8,
     is_error: bool = false,
