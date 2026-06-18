@@ -42,6 +42,11 @@ jobs:
           vcpkg install openssl:x64-windows --triplet x64-windows
           $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { "C:\vcpkg" }
           echo "OPENSSL_DIR=$vcpkgRoot\installed\x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Debug vcpkg lib dir (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Get-ChildItem -Recurse -Filter *.lib C:\vcpkg\installed\x64-windows\lib\
       - name: Build (Unix)
         if: runner.os != 'Windows'
         run: zig build -Doptimize=ReleaseSafe
