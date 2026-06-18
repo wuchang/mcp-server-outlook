@@ -19,8 +19,13 @@ pub fn build(b: *std.Build) void {
         exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
     }
     if (target.result.os.tag == .windows) {
-        exe_mod.linkSystemLibrary("libssl", .{});
-        exe_mod.linkSystemLibrary("libcrypto", .{});
+        // On Windows, Zig strips the "lib" prefix, so linkSystemLibrary("libssl")
+        // passes -lssl which looks for ssl.lib — but vcpkg provides libssl.lib.
+        // Use addObjectFile to reference the actual file instead.
+        if (openssl_dir) |dir| {
+            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libssl.lib" }) });
+            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libcrypto.lib" }) });
+        }
     } else {
         exe_mod.linkSystemLibrary("ssl", .{});
         exe_mod.linkSystemLibrary("crypto", .{});
