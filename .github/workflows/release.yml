@@ -55,12 +55,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - run: |
-          cd artifacts
-          for d in */; do
-            mv "$d"/* . && rmdir "$d"
-          done
-          ls -la
+          merge-multiple: true
+      - run: ls -la artifacts/
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
