@@ -2,7 +2,6 @@ name: Release
 on:
   push:
     tags: ["v*"]
-    branches: ["test-win"]
 jobs:
   build:
     strategy:
@@ -12,47 +11,25 @@ jobs:
           - os: ubuntu-latest
             artifact: mcp-server-outlook-linux-x86_64
             ext: ""
+            dep: sudo apt install -y libssl-dev
           - os: macos-latest
             artifact: mcp-server-outlook-macos-arm64
             ext: ""
+            dep: brew install openssl
           - os: macos-14
             artifact: mcp-server-outlook-macos-x86_64
             ext: ""
-          - os: windows-latest
-            artifact: mcp-server-outlook-windows-x86_64.exe
-            ext: ".exe"
-            continue-on-error: true
+            dep: brew install openssl
     runs-on: ${{ matrix.target.os }}
-    continue-on-error: ${{ matrix.target.continue-on-error == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
-      - name: Install deps (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt install -y libssl-dev
-      - name: Install deps (macOS)
-        if: runner.os == 'macOS'
-        run: brew install openssl
-      - name: Install deps (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install openssl:x64-windows
-          echo "OPENSSL_DIR=$env:VCPKG_ROOT\installed\x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Build (Unix)
-        if: runner.os != 'Windows'
-        run: zig build -Doptimize=ReleaseSafe
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: zig build -Doptimize=ReleaseSafe -Dopenssl-dir="$env:OPENSSL_DIR"
-      - name: Strip binary
-        if: runner.os != 'Windows'
-        run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
-      - name: Rename artifact
-        run: mv zig-out/bin/mcp-server-outlook${{ matrix.target.ext }} ${{ matrix.target.artifact }}
+      - run: ${{ matrix.target.dep }}
+      - run: zig build -Doptimize=ReleaseSafe
+      - run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
+      - run: mv zig-out/bin/mcp-server-outlook${{ matrix.target.ext }} ${{ matrix.target.artifact }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target.artifact }}

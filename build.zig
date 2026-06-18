@@ -13,14 +13,23 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.link_libc = true;
 
+    // tls.zig uses @cImport with tls_cimport.h — make src/ available as include path
+    exe_mod.addIncludePath(.{ .cwd_relative = "src" });
+
     const openssl_dir = b.option([]const u8, "openssl-dir", "OpenSSL installation directory (include/ and lib/ subdirs expected)");
     if (openssl_dir) |dir| {
         exe_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ dir, "include" }) });
         exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
     }
     if (target.result.os.tag == .windows) {
-        exe_mod.linkSystemLibrary("libssl", .{});
-        exe_mod.linkSystemLibrary("libcrypto", .{});
+        // On Windows, Zig passes "-lssl" to the linker which looks for "ssl.lib",
+        // but vcpkg provides "libssl.lib". Use addObjectFile to reference the
+        // actual file directly. Also link ws2_32 for Winsock.
+        if (openssl_dir) |dir| {
+            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libssl.lib" }) });
+            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libcrypto.lib" }) });
+        }
+        exe_mod.linkSystemLibrary("ws2_32", .{});
     } else {
         exe_mod.linkSystemLibrary("ssl", .{});
         exe_mod.linkSystemLibrary("crypto", .{});

@@ -4,7 +4,6 @@
 const std = @import("std");
 const c = @cImport({
     @cInclude("time.h");
-    @cInclude("unistd.h");
 });
 const log = @import("../log.zig");
 const tls = @import("../tls.zig");
@@ -20,7 +19,7 @@ pub const AccessToken = struct {
 };
 
 fn now() i64 {
-    return c.time(null);
+    return @as(i64, @intCast(c.time(null)));
 }
 
 /// Full Device Code Flow: try cache → refresh → new flow
@@ -154,7 +153,7 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
     var poll_count: u32 = 0;
 
     while (true) {
-        // Sleep using libc nanosleep
+        // Sleep interval seconds
         var ts = c.struct_timespec{ .tv_sec = @intCast(interval), .tv_nsec = 0 };
         _ = c.nanosleep(&ts, null);
 

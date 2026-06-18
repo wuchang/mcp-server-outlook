@@ -3,11 +3,7 @@
 const std = @import("std");
 const log = @import("log.zig");
 const c = @cImport({
-    @cInclude("openssl/ssl.h");
-    @cInclude("openssl/err.h");
-    @cInclude("sys/socket.h");
-    @cInclude("netdb.h");
-    @cInclude("unistd.h");
+    @cInclude("tls_cimport.h");
 });
 
 var ssl_ctx: ?*c.SSL_CTX = null;

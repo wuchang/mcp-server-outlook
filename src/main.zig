@@ -23,7 +23,7 @@ const auth_oauth = @import("auth/oauth.zig");
 pub fn main() !void {
     log.init();
 
-    // Parse argv: --help, --logout
+    // Parse argv: --help, --logout (via /proc/self/cmdline, cross-compile friendly)
     {
         const raw_fd = std.os.linux.open("/proc/self/cmdline", .{}, 0);
         if (raw_fd <= std.math.maxInt(i32)) {
@@ -68,29 +68,29 @@ pub fn main() !void {
     const config = config_mod.Config.load(allocator) catch |err| switch (err) {
         error.MissingClientId => {
             // Auto-create config template
-            const home = c.getenv("HOME") orelse c.getenv("USERPROFILE");
-            const home_slice = if (home) |h| std.mem.sliceTo(h, 0) else ".";
-            const config_dir = try std.fmt.allocPrint(allocator, "{s}/.config/outlook-mcp", .{home_slice});
+            const home_env = c.getenv("HOME") orelse c.getenv("USERPROFILE");
+            const home = if (home_env) |h| std.mem.sliceTo(h, 0) else ".";
+            const config_dir = try std.fmt.allocPrint(allocator, "{s}/.config/outlook-mcp", .{home});
             const config_path = try std.fmt.allocPrint(allocator, "{s}/config", .{config_dir});
             defer allocator.free(config_dir);
             defer allocator.free(config_path);
 
-            // Create config dir and template file
-            const config_z = try allocator.alloc(u8, config_dir.len + 1);
-            defer allocator.free(config_z);
-            @memcpy(config_z[0..config_dir.len], config_dir);
-            config_z[config_dir.len] = 0;
-            _ = c.mkdir(config_z.ptr, 0o755); // ignore if exists
+            // Create config dir using C mkdir
+            const dir_z = try allocator.alloc(u8, config_dir.len + 1);
+            defer allocator.free(dir_z);
+            @memcpy(dir_z[0..config_dir.len], config_dir);
+            dir_z[config_dir.len] = 0;
+            _ = c.mkdir(dir_z.ptr, 0o755); // ignore if exists
 
-            // Write template if file doesn't exist
-            const path_z = try allocator.alloc(u8, config_path.len + 1);
-            defer allocator.free(path_z);
-            @memcpy(path_z[0..config_path.len], config_path);
-            path_z[config_path.len] = 0;
+            // Check if config already exists, create template if not
+            const cfg_z = try allocator.alloc(u8, config_path.len + 1);
+            defer allocator.free(cfg_z);
+            @memcpy(cfg_z[0..config_path.len], config_path);
+            cfg_z[config_path.len] = 0;
 
-            const f = c.fopen(path_z.ptr, "r");
-            if (f == null) {
-                const fw = c.fopen(path_z.ptr, "w");
+            const existing = c.fopen(cfg_z.ptr, "r");
+            if (existing == null) {
+                const fw = c.fopen(cfg_z.ptr, "w");
                 if (fw) |fw_ptr| {
                     const tmpl =
                         "# Outlook MCP 配置文件\n" ++
@@ -100,7 +100,7 @@ pub fn main() !void {
                     _ = c.fclose(fw_ptr);
                 }
             } else {
-                _ = c.fclose(f);
+                _ = c.fclose(existing);
             }
 
             std.debug.print(
@@ -251,25 +251,22 @@ fn printUsage() void {
 
 fn doLogout() void {
     // Delete token cache file
-    const home = c.getenv("HOME") orelse c.getenv("USERPROFILE");
-    const home_slice = if (home) |h| std.mem.sliceTo(h, 0) else ".";
-    const config_dir = std.fmt.allocPrint(std.heap.page_allocator, "{s}/.config/outlook-mcp", .{home_slice}) catch ".";
+    const home_c2 = c.getenv("HOME") orelse c.getenv("USERPROFILE");
+    const home = if (home_c2) |h| std.mem.sliceTo(h, 0) else ".";
+    const config_dir = std.fmt.allocPrint(std.heap.page_allocator, "{s}/.config/outlook-mcp", .{home}) catch return;
     defer std.heap.page_allocator.free(config_dir);
-    const token_path = std.fmt.allocPrint(std.heap.page_allocator, "{s}/token.json", .{config_dir}) catch ".";
+    const token_path = std.fmt.allocPrint(std.heap.page_allocator, "{s}/token.json", .{config_dir}) catch return;
     defer std.heap.page_allocator.free(token_path);
 
-    const path_z = std.heap.page_allocator.alloc(u8, token_path.len + 1) catch return;
-    defer std.heap.page_allocator.free(path_z);
-    @memcpy(path_z[0..token_path.len], token_path);
-    path_z[token_path.len] = 0;
-
-    const ret = c.remove(path_z.ptr);
+    const token_z = std.heap.page_allocator.alloc(u8, token_path.len + 1) catch return;
+    defer std.heap.page_allocator.free(token_z);
+    @memcpy(token_z[0..token_path.len], token_path);
+    token_z[token_path.len] = 0;
+    const ret = c.remove(token_z.ptr);
     if (ret == 0) {
-        const ok = "✅ 已注销 — token 缓存文件已删除\n";
-        _ = std.os.linux.write(std.posix.STDOUT_FILENO, ok.ptr, ok.len);
+        std.debug.print("✅ 已注销 — token 缓存文件已删除\n", .{});
     } else {
-        const fail = "ℹ️  没有已保存的登录凭证\n";
-        _ = std.os.linux.write(std.posix.STDOUT_FILENO, fail.ptr, fail.len);
+        std.debug.print("ℹ️  没有已保存的登录凭证\n", .{});
     }
 }
 
