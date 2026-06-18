@@ -13,6 +13,9 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.link_libc = true;
 
+    // tls.zig uses @cImport with tls_cimport.h — make src/ available as include path
+    exe_mod.addIncludePath(.{ .cwd_relative = "src" });
+
     const openssl_dir = b.option([]const u8, "openssl-dir", "OpenSSL installation directory (include/ and lib/ subdirs expected)");
     if (openssl_dir) |dir| {
         exe_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ dir, "include" }) });
