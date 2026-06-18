@@ -8,6 +8,26 @@ const graph_host = "graph.microsoft.com";
 const graph_port = 443;
 const base = "/v1.0";
 
+/// URL-encode a path segment (e.g. list_id that may contain `=`)
+/// Only encodes characters unsafe in URL paths: ` `, `?`, `#`, `[`, `]`, `%`
+/// and base64 padding `=` (which confuses some Graph API URI parsers)
+pub fn urlEncodePathSegment(allocator: std.mem.Allocator, segment: []const u8) ![]const u8 {
+    const hex = "0123456789ABCDEF";
+    var result = std.ArrayList(u8).empty;
+    defer result.deinit(allocator);
+    for (segment) |c| {
+        switch (c) {
+            ' ', '?', '#', '[', ']', '%', '=' => {
+                try result.append(allocator, '%');
+                try result.append(allocator, hex[c >> 4]);
+                try result.append(allocator, hex[c & 0xF]);
+            },
+            else => try result.append(allocator, c),
+        }
+    }
+    return result.toOwnedSlice(allocator);
+}
+
 /// Transport function: (allocator, method, host, port, path, auth_header, body) → body
 pub const TransportFn = *const fn (
     allocator: std.mem.Allocator,

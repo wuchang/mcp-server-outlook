@@ -43,12 +43,13 @@ pub const Config = struct {
             return error.MissingClientId;
         };
 
-        const scopes = try allocator.alloc([]const u8, 5);
-        scopes[0] = "Mail.ReadWrite";
-        scopes[1] = "Mail.Send";
-        scopes[2] = "Calendars.ReadWrite";
-        scopes[3] = "User.Read";
-        scopes[4] = "Tasks.ReadWrite";
+        const scopes = try allocator.alloc([]const u8, 6);
+        scopes[0] = "offline_access";
+        scopes[1] = "Mail.ReadWrite";
+        scopes[2] = "Mail.Send";
+        scopes[3] = "Calendars.ReadWrite";
+        scopes[4] = "User.Read";
+        scopes[5] = "Tasks.ReadWrite";
 
         return Config{
             .client_id = resolved,

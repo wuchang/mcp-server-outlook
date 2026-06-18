@@ -8,46 +8,61 @@ const events_path = "/me/calendar/events";
 
 fn now() i64 { return c.time(null); }
 
+fn pad2(buf: *[2]u8, n: i32) []const u8 {
+    buf[0] = @intCast('0' + @divFloor(n, 10));
+    buf[1] = @intCast('0' + @mod(n, 10));
+    return buf;
+}
+
+fn fmtIsoUtc(allocator: std.mem.Allocator, ts: i64) ![]const u8 {
+    const gm = c.gmtime(&ts);
+    if (gm == null) return "2025-01-01T00:00:00Z";
+    const y = gm.*.tm_year + 1900;
+    const m = gm.*.tm_mon + 1;
+    const d = gm.*.tm_mday;
+    const hh = gm.*.tm_hour;
+    const mm = gm.*.tm_min;
+    const ss = gm.*.tm_sec;
+
+    var mbuf: [2]u8 = undefined;
+    var dbuf: [2]u8 = undefined;
+    var hbuf: [2]u8 = undefined;
+    var minbuf: [2]u8 = undefined;
+    var sbuf: [2]u8 = undefined;
+
+    return std.fmt.allocPrint(allocator, "{d}-{s}-{s}T{s}:{s}:{s}Z",
+        .{ y, pad2(&mbuf, m), pad2(&dbuf, d), pad2(&hbuf, hh), pad2(&minbuf, mm), pad2(&sbuf, ss) }
+    );
+}
+
 pub fn listEvents(client: *gc.GraphClient, days: i64) ![]const u8 {
     const t = now();
-    const start_str = "2025-01-01T00:00:00Z"; // placeholder - TODO: format properly
-    const end_str = "2025-01-08T00:00:00Z";
-    _ = t;
-    _ = days;
-
-    const filter = try std.fmt.allocPrint(client.allocator,
-        "start/dateTime ge '{s}' and start/dateTime le '{s}'",
-        .{ start_str, end_str }
-    );
-    defer client.allocator.free(filter);
+    const start = try fmtIsoUtc(client.allocator, t);
+    defer client.allocator.free(start);
+    const end = try fmtIsoUtc(client.allocator, t + days * 86400);
+    defer client.allocator.free(end);
 
     const path = try std.fmt.allocPrint(client.allocator,
-        "{s}?$top=20&$select=subject,start,end,location,showAs&$orderby=start/dateTime asc&$filter={s}",
-        .{ events_path, filter }
+        "{s}?$top=20&$select=subject,start,end,location,showAs&$orderby=start/dateTime+asc&$filter=start/dateTime+ge+'{s}'+and+start/dateTime+le+'{s}'",
+        .{ events_path, start, end }
     );
     defer client.allocator.free(path);
     return client.get(path);
 }
 
 pub fn queryEvents(client: *gc.GraphClient, start_date: []const u8, end_date: []const u8) ![]const u8 {
-    const filter = try std.fmt.allocPrint(client.allocator,
-        "start/dateTime ge '{s}T00:00:00Z' and start/dateTime le '{s}T23:59:59Z'",
-        .{ start_date, end_date }
-    );
-    defer client.allocator.free(filter);
-
     const path = try std.fmt.allocPrint(client.allocator,
-        "{s}?$top=50&$select=subject,start,end,location,showAs&$orderby=start/dateTime asc&$filter={s}",
-        .{ events_path, filter }
+        "{s}?$top=50&$select=subject,start,end,location,showAs&$orderby=start/dateTime+asc&$filter=start/dateTime+ge+'{s}T00:00:00Z'+and+start/dateTime+le+'{s}T23:59:59Z'",
+        .{ events_path, start_date, end_date }
     );
     defer client.allocator.free(path);
     return client.get(path);
 }
 
-pub fn searchEvents(client: *gc.GraphClient, _: []const u8) ![]const u8 {
+pub fn searchEvents(client: *gc.GraphClient, keyword: []const u8) ![]const u8 {
     const path = try std.fmt.allocPrint(client.allocator,
-        "{s}?$top=50&$select=subject,start,end,location,showAs&$orderby=start/dateTime asc",
-        .{events_path}
+        "{s}?$top=50&$select=subject,start,end,location,showAs&$orderby=start/dateTime+asc&$search=\"{s}\"",
+        .{ events_path, keyword }
     );
     defer client.allocator.free(path);
     return client.get(path);
@@ -80,7 +95,6 @@ pub fn createEvent(client: *gc.GraphClient, subject: []const u8, start: []const 
         try obj.put(client.allocator, "body", .{ .object = body_obj });
     };
 
-    // Serialize to JSON using std.json.fmt
     var jbuf: [8192]u8 = undefined;
     const json = try std.fmt.bufPrint(&jbuf, "{f}", .{std.json.fmt(std.json.Value{ .object = obj }, .{})});
     return client.post(events_path, json);

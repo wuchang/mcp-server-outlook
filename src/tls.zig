@@ -128,7 +128,20 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
             }
 
             if (std.mem.indexOf(u8, buf[0..total], "\r\n\r\n")) |hdr_end| {
-                return try allocator.dupe(u8, buf[hdr_end + 4 .. total]);
+                const body = buf[hdr_end + 4 .. total];
+
+                // Parse HTTP status code from "HTTP/1.1 NNN ..."
+                const status_line_end = std.mem.indexOfScalar(u8, buf[0..total], '\r') orelse total;
+                const status_line = buf[0..status_line_end];
+                var sc: u16 = 0;
+                if (status_line.len >= 12) {
+                    sc = std.fmt.parseInt(u16, status_line[9..12], 10) catch 0;
+                }
+                if (sc >= 400) {
+                    log.warn("HTTP {d} from {s}:{s} — {s}", .{ sc, host, port_str, body[0..@min(body.len, 200)] });
+                    return error.HttpError;
+                }
+                return try allocator.dupe(u8, body);
             }
             log.debug("bad HTTP response (try {d}/3)", .{attempt + 1});
             break :attempt;

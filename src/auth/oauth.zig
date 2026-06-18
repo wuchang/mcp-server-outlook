@@ -184,7 +184,7 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
         if (obj.get("error")) |err_val| {
             const err_str = if (err_val == .string) err_val.string else "";
             const desc = if (obj.get("error_description")) |d| (if (d == .string) d.string else "") else "";
-            log.debug("token poll HTTP response ({d} bytes): {s}", .{ response.len, response[0..@min(response.len, 200)] });
+            log.warn("token poll HTTP response ({d} bytes): {s}", .{ response.len, response[0..@min(response.len, 400)] });
             // authorization_pending / slow_down → 继续轮询
             if (std.mem.eql(u8, err_str, "authorization_pending") or
                 std.mem.eql(u8, err_str, "slow_down")) {
@@ -198,14 +198,14 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
             log.warn("unexpected token error: {s} — {s}", .{ err_str, desc });
             return error.AuthorizationPending;
         }
+        log.debug("token response keys: access_token={} refresh_token={} expires_in={}",
+            .{ obj.get("access_token") != null, obj.get("refresh_token") != null, obj.get("expires_in") != null });
+
         log.info("token obtained after {d} polls", .{poll_count});
-        log.debug("token response: access_token has={} refresh_token has={}", .{
-            obj.get("access_token") != null,
-            obj.get("refresh_token") != null,
-        });
 
         const access_token = getString(obj, "access_token") orelse return error.TokenRequestFailed;
-        const refresh_token = getString(obj, "refresh_token") orelse return error.TokenRequestFailed;
+        // refresh_token is optional — MS doesn't always return it
+        const refresh_token = getString(obj, "refresh_token") orelse access_token;
         const expires_in_val = getInt(obj, "expires_in", 3600);
 
         return AccessToken{
