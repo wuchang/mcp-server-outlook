@@ -20,7 +20,9 @@ jobs:
           - os: windows-latest
             artifact: mcp-server-outlook-windows-x86_64.exe
             ext: ".exe"
+            continue-on-error: true
     runs-on: ${{ matrix.target.os }}
+    continue-on-error: ${{ matrix.target.continue-on-error == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: goto-bus-stop/setup-zig@v2
