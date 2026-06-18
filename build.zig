@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) void {
             exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libssl.lib" }) });
             exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libcrypto.lib" }) });
         }
+        exe_mod.linkSystemLibrary("ws2_32", .{});
     } else {
         exe_mod.linkSystemLibrary("ssl", .{});
         exe_mod.linkSystemLibrary("crypto", .{});
