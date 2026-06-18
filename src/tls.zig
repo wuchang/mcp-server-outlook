@@ -60,9 +60,9 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
             const dst = @as([*]u8, @ptrCast(&g_cached_sa))[0..dns_res.?.ai_addrlen];
             @memcpy(dst, src);
             if (g_cached_sa.ss_family == c.AF_INET) {
-                @as(*c.sockaddr_in, @ptrCast(&g_cached_sa)).sin_port = c.htons(@as(c.uint16_t, @intCast(port)));
+                @as(*c.sockaddr_in, @ptrCast(&g_cached_sa)).sin_port = c.htons(@as(u16, @intCast(port)));
             } else if (g_cached_sa.ss_family == c.AF_INET6) {
-                @as(*c.sockaddr_in6, @ptrCast(&g_cached_sa)).sin6_port = c.htons(@as(c.uint16_t, @intCast(port)));
+                @as(*c.sockaddr_in6, @ptrCast(&g_cached_sa)).sin6_port = c.htons(@as(u16, @intCast(port)));
             }
             g_cached_salen = dns_res.?.ai_addrlen;
             g_cached_host = host;
