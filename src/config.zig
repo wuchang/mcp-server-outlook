@@ -71,32 +71,40 @@ fn getHome() []const u8 {
 
 /// Read KEY=VALUE lines from config file, look for CLIENT_ID
 fn readConfigFile(allocator: std.mem.Allocator, path: []const u8) !?[]const u8 {
-    // fopen needs a null-terminated string — create one
+    // Use POSIX open/read — avoids fgets C translation bug in ReleaseSafe
     const path_z = try allocator.alloc(u8, path.len + 1);
     defer allocator.free(path_z);
     @memcpy(path_z[0..path.len], path);
     path_z[path.len] = 0;
-    const f = c.fopen(@as([*:0]const u8, @ptrCast(path_z.ptr)), "r");
-    if (f == null) return null;
-    defer _ = c.fclose(f);
 
-    var line_buf: [512]u8 = undefined;
+    const raw_fd = std.os.linux.open(@as([*:0]const u8, @ptrCast(path_z.ptr)), .{}, 0);
+    if (raw_fd > std.math.maxInt(i32)) return null;
+    const fd: i32 = @intCast(raw_fd);
+    defer _ = std.os.linux.close(fd);
 
-    while (c.fgets(&line_buf, @intCast(line_buf.len), f)) |line| {
-        // Convert C string to Zig slice
-        const zig_line = std.mem.sliceTo(@as([*:0]u8, @ptrCast(line)), 0);
-        const ln = std.mem.trimEnd(u8, zig_line, " \t\r\n");
-        // Skip comments and empty
-        if (ln.len == 0 or ln[0] == '#' or ln[0] == ';') continue;
+    var buf: [4096]u8 = undefined;
+    const n = std.os.linux.read(fd, &buf, buf.len);
+    if (n == 0) return null;
 
-        // Split on first =
-        const eq_pos = std.mem.indexOfScalar(u8, ln, '=') orelse continue;
-        const key = std.mem.trim(u8, ln[0..eq_pos], " \t");
-        const value = std.mem.trim(u8, ln[eq_pos + 1 ..], " \t\"'");
+    // Parse line by line
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (buf[i] == '\n' or i == n - 1) {
+            const end = if (i < n and buf[i] == '\n') i else i + 1;
+            const ln = std.mem.trimEnd(u8, buf[start..end], " \t\r\n");
+            start = i + 1;
 
-        if (std.ascii.eqlIgnoreCase(key, "CLIENT_ID") or std.ascii.eqlIgnoreCase(key, "AZURE_CLIENT_ID")) {
-            if (value.len > 0) {
-                return try allocator.dupe(u8, value);
+            if (ln.len == 0 or ln[0] == '#' or ln[0] == ';') continue;
+
+            const eq_pos = std.mem.indexOfScalar(u8, ln, '=') orelse continue;
+            const key = std.mem.trim(u8, ln[0..eq_pos], " \t");
+            const value = std.mem.trim(u8, ln[eq_pos + 1 ..], " \t\"'");
+
+            if (std.ascii.eqlIgnoreCase(key, "CLIENT_ID") or std.ascii.eqlIgnoreCase(key, "AZURE_CLIENT_ID")) {
+                if (value.len > 0) {
+                    return try allocator.dupe(u8, value);
+                }
             }
         }
     }

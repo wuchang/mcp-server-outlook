@@ -20,7 +20,7 @@ sudo apt install libssl-dev   # Debian/Ubuntu
 zig build -Doptimize=ReleaseSafe
 ```
 
-产物在 `zig-out/bin/mcp-server-outlook`。
+产物在 `zig-out/bin/mcp-server-outlook`（Debug ~17MB，ReleaseSafe ~4MB / strip 后 ~750KB）。
 
 ### 验证
 
