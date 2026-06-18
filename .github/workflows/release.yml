@@ -45,7 +45,7 @@ jobs:
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: zig build -Doptimize=ReleaseSafe --openssl-dir "$env:VCPKG_OPENSSL_DIR"
+        run: zig build -Doptimize=ReleaseSafe -Dopenssl-dir="$env:VCPKG_OPENSSL_DIR"
       - if: runner.os != 'Windows'
         run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
       - run: mv zig-out/bin/mcp-server-outlook${{ matrix.target.ext }} ${{ matrix.target.artifact }}
