@@ -39,6 +39,9 @@ jobs:
         run: choco install openssl -y --no-progress
       - name: Build
         run: zig build -Doptimize=ReleaseSafe
+      - name: Strip binary
+        if: runner.os != 'Windows'
+        run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
       - name: Rename artifact
         run: mv zig-out/bin/mcp-server-outlook${{ matrix.target.ext }} ${{ matrix.target.artifact }}
       - uses: actions/upload-artifact@v4
