@@ -2,6 +2,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    branches: ["test-win"]
 jobs:
   build:
     strategy:
@@ -36,14 +37,17 @@ jobs:
         run: brew install openssl
       - name: Install deps (Windows)
         if: runner.os == 'Windows'
-        run: choco install openssl -y --no-progress
+        shell: pwsh
+        run: |
+          vcpkg install openssl:x64-windows
+          echo "OPENSSL_DIR=$env:VCPKG_ROOT\installed\x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build (Unix)
         if: runner.os != 'Windows'
         run: zig build -Doptimize=ReleaseSafe
       - name: Build (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: zig build -Doptimize=ReleaseSafe -Dopenssl-dir="C:\Program Files\OpenSSL-Win64"
+        run: zig build -Doptimize=ReleaseSafe -Dopenssl-dir="$env:OPENSSL_DIR"
       - name: Strip binary
         if: runner.os != 'Windows'
         run: strip zig-out/bin/mcp-server-outlook${{ matrix.target.ext }}
