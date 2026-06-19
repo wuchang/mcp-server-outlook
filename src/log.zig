@@ -6,11 +6,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const c = @cImport({
-    @cDefine("__STDC_LIB_EXT1__", "0");
-    @cDefine("__STDC_WANT_SECURE_LIB__", "0");
-    @cInclude("stdlib.h");
-    @cInclude("time.h");
-    @cInclude("stdio.h");
+    @cInclude("c_minimal.h");
 });
 
 pub const Level = enum(u8) { debug, info, warn, err };

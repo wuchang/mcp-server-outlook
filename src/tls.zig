@@ -22,53 +22,26 @@ pub const Error = error{
 };
 
 // 网络相关 C 函数（POSIX socket API，Windows 也支持通过 MinGW）
-/// 网络相关的 C 函数 — 非 Windows 平台全量引入
-/// 修改点：Windows 上使用 Minimal 包装头，避免 MinGW fortify 编译错误
-const net = if (builtin.target.os.tag != .windows) @cImport({
+/// 网络相关 C 函数 — 全平台通用
+const net = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("netdb.h");
     @cInclude("unistd.h");
     @cInclude("time.h");
-}) else @cImport({
-    @cInclude("c_minimal_net.h");
 });
 
 /// OpenSSL 头文件 — 仅限非 Windows 平台
 /// Windows 交叉编译时此块被编译期排除，避免找不到 openssl/ssl.h
-const ssl = if (builtin.target.os.tag != .windows) @cImport({
+const ssl = @cImport({
     @cInclude("openssl/ssl.h");
     @cInclude("openssl/err.h");
-}) else struct {
-    pub const SSL_CTX = opaque {};
-    pub const SSL = opaque {};
-    pub const SSL_VERIFY_NONE = 0;
-    pub const SSL_ERROR_ZERO_RETURN = 0;
-    pub fn OPENSSL_init_ssl(_: u64, _: ?*anyopaque) c_int { return 0; }
-    pub fn SSL_CTX_new(_: anytype) ?*SSL_CTX { return null; }
-    pub fn SSL_CTX_set_verify(_: anytype, _: anytype, _: ?*anyopaque) void {}
-    pub fn SSL_CTX_free(_: ?*SSL_CTX) void {}
-    pub fn SSL_new(_: ?*SSL_CTX) ?*SSL { return null; }
-    pub fn SSL_free(_: ?*SSL) void {}
-    pub fn SSL_set_fd(_: ?*SSL, _: c_int) c_int { return -1; }
-    pub fn SSL_connect(_: ?*SSL) c_int { return -1; }
-    pub fn SSL_write(_: ?*SSL, _: ?*const anyopaque, _: c_int) c_int { return -1; }
-    pub fn SSL_read(_: ?*SSL, _: ?*anyopaque, _: c_int) c_int { return -1; }
-    pub fn SSL_get_error(_: ?*SSL, _: c_int) c_int { return 0; }
-    pub fn SSL_library_init() c_int { return 0; }
-    pub fn SSL_load_error_strings() void {}
-};
+});
 
 // ── 全局 SSL 上下文 ──
 var ssl_ctx: ?*ssl.SSL_CTX = null;
 
 pub fn init() !void {
     if (ssl_ctx != null) return;
-    if (comptime builtin.target.os.tag == .windows) {
-        // Windows: OpenSSL 不可用，初始化跳过
-        // 后续可链接 WinHTTP 替代
-        log.warn("TLS not available on Windows, HTTPS calls will fail", .{});
-        return;
-    }
     _ = ssl.OPENSSL_init_ssl(0, null);
     const ctx = ssl.SSL_CTX_new(ssl.TLS_client_method());
     if (ctx == null) return error.SslInitFailed;
@@ -78,9 +51,7 @@ pub fn init() !void {
 
 pub fn deinit() void {
     if (ssl_ctx) |ctx| {
-        if (comptime builtin.target.os.tag != .windows) {
-            ssl.SSL_CTX_free(ctx);
-        }
+        ssl.SSL_CTX_free(ctx);
         ssl_ctx = null;
     }
 }
@@ -88,10 +59,6 @@ pub fn deinit() void {
 /// 发送 HTTP 请求（完整 TLS 连接） — 跨平台
 /// Windows 上返回 SslInitFailed 错误（需要额外配置 OpenSSL）
 pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_request: []const u8) ![]const u8 {
-    if (builtin.target.os.tag == .windows) {
-        return error.SslInitFailed;
-    }
-
     const port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
     defer allocator.free(port_str);
 

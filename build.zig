@@ -4,32 +4,35 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // ── Executable ──
-
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     exe_mod.link_libc = true;
-
-    // tls.zig uses @cImport with tls_cimport.h — make src/ available as include path
     exe_mod.addIncludePath(.{ .cwd_relative = "src" });
 
-    const openssl_dir = b.option([]const u8, "openssl-dir", "OpenSSL installation directory (include/ and lib/ subdirs expected)");
-    if (openssl_dir) |dir| {
-        exe_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ dir, "include" }) });
-        exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
-    }
+    // ── OpenSSL 库链接 ──
+    // Windows MinGW: zig build -Dtarget=x86_64-windows-gnu -Dopenssl-dir=...
+    // Linux/macOS: 系统动态链接
+    const openssl_dir = b.option([]const u8, "openssl-dir",
+        \\MinGW OpenSSL 目录。Linux 交叉编译 Windows 时：
+        \\ sudo apt install mingw-w64-x86-64-dev
+        \\ 或手动下载后解压，指定此路径。
+    );
     if (target.result.os.tag == .windows) {
-        // On Windows, Zig passes "-lssl" to the linker which looks for "ssl.lib",
-        // but vcpkg provides "libssl.lib". Use addObjectFile to reference the
-        // actual file directly. Also link ws2_32 for Winsock.
-        if (openssl_dir) |dir| {
-            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libssl.lib" }) });
-            exe_mod.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib", "libcrypto.lib" }) });
+        if (target.result.abi == .gnu) {
+            if (openssl_dir) |dir| {
+                exe_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ dir, "include" }) });
+                exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
+                exe_mod.linkSystemLibrary("ssl", .{});
+                exe_mod.linkSystemLibrary("crypto", .{});
+                exe_mod.linkSystemLibrary("ws2_32", .{});
+            } else {
+                @panic("交叉编译 Windows 需要 -Dopenssl-dir=指向 MinGW OpenSSL。\n  " ++
+                    "获取方式: 安装 mingw-w64-x86-64-dev 或从 msys2 下载。");
+            }
         }
-        exe_mod.linkSystemLibrary("ws2_32", .{});
     } else {
         exe_mod.linkSystemLibrary("ssl", .{});
         exe_mod.linkSystemLibrary("crypto", .{});
@@ -45,16 +48,12 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // ── Tests ──
-
-    // Use a wrapper file that doesn't need `../` imports
-    // Create the test in a file at src/ level
     const test_mod = b.createModule(.{
         .root_source_file = b.path("src/test_graph.zig"),
         .target = target,
         .optimize = optimize,
     });
     test_mod.link_libc = true;
-
     const test_exe = b.addTest(.{ .root_module = test_mod });
     const test_step = b.step("test", "Run Graph client unit tests");
     test_step.dependOn(&b.addRunArtifact(test_exe).step);

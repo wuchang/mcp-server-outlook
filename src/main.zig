@@ -3,11 +3,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const c = @cImport({
-    @cDefine("__STDC_LIB_EXT1__", "0");
-    @cDefine("__STDC_WANT_SECURE_LIB__", "0");
-    @cInclude("stdlib.h");
-    @cInclude("stdio.h");
-    @cInclude("sys/stat.h");
+    @cInclude("c_minimal.h");
 });
 const log = @import("log.zig");
 const config_mod = @import("config.zig");

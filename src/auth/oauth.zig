@@ -4,8 +4,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const c = @cImport({
-    @cInclude("time.h");  // time(), nanosleep, struct_timespec
-    @cInclude("unistd.h"); // for sleep fallback on macOS
+    @cInclude("c_minimal.h");
 });
 const log = @import("../log.zig");
 const tls = @import("../tls.zig");
@@ -168,13 +167,10 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
         log.debug("polling token endpoint (attempt {d}, elapsed {d}s)", .{ poll_count, elapsed });
 
         const response = tls.postForm(allocator, login_host, 443, login_path ++ "/token", body) catch |err| {
-            switch (err) {
-                error.DnsResolutionFailed,
-                error.SslNewFailed,
-                error.HttpError,
-                => continue,
-                else => return err,
-            }
+            log.debug("poll error: {s}", .{@errorName(err)});
+            // Windows: SslInitFailed means TLS not available
+            // Other platforms: transient errors to retry on
+            continue;
         };
         defer allocator.free(response);
 

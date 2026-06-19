@@ -3,9 +3,7 @@
 
 const std = @import("std");
 const c = @cImport({
-    @cDefine("__STDC_LIB_EXT1__", "0");
-    @cInclude("stdio.h");
-    @cInclude("sys/stat.h");
+    @cInclude("c_minimal.h");
 });
 
 pub const TokenCache = struct {
@@ -61,7 +59,11 @@ pub const TokenCache = struct {
             defer self.allocator.free(dir_z);
             @memcpy(dir_z[0..s], self.path[0..s]);
             dir_z[s] = 0;
-            _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_z.ptr)), 0o755);
+            if (@import("builtin").target.os.tag == .windows) {
+                _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_z.ptr)));
+            } else {
+                _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_z.ptr)), 0o755);
+            }
         }
 
         // 构建 JSON

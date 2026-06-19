@@ -1,25 +1,34 @@
-// Minimal C declarations — avoids MinGW fortify/Annex K issues on Windows
-// Used instead of broad <stdlib.h>/<stdio.h> includes
-// On Windows, declare only the functions we use.
+// Absolute minimal C declarations for Windows cross-compilation.
+// Declares ONLY the functions used by the project, with NO includes.
+// This completely avoids MinGW header translation bugs (wcscat_s, etc.).
 
-#ifdef _WIN32
-#define __STDC_LIB_EXT1__ 0
-#include <stddef.h> // for size_t
-// On Windows, manually declare the functions we need
-// to avoid including full headers with MinGW fortify issues
+#ifndef _WIN32
+#include <stdlib.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#else
+#define _WIN32_WINNT 0x0601
+typedef unsigned long long size_t;
+typedef long long time_t;
+
+// stdlib functions
 char *getenv(const char *name);
-int mkdir(const char *pathname);
 int remove(const char *pathname);
-// stdio functions (declared without macros)
-typedef struct _iobuf FILE;
-extern FILE *__acrt_iob_func(int idx);
+
+// stdio types and functions — forward declared opaque type
+// We only pass FILE* pointers, never dereference them
+struct __File { int _dummy; };
+typedef struct __File FILE;
 FILE *fopen(const char *path, const char *mode);
 int fclose(FILE *f);
 int fgetc(FILE *f);
 size_t fwrite(const void *ptr, size_t sz, size_t n, FILE *f);
-#else
-// POSIX: standard headers work fine
-#include <stdlib.h>
-#include <stdio.h>
-#include <sys/stat.h>
+
+// sys/stat
+int mkdir(const char *pathname);
+
+// time.h types (needed by log.zig)
+struct timespec { long tv_sec; long tv_nsec; };
+time_t time(time_t *t);
+int nanosleep(const struct timespec *req, struct timespec *rem);
 #endif
