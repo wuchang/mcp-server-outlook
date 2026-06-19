@@ -34,11 +34,32 @@ pub const ToolError = error{
     Unknown,
 };
 
+const builtin = @import("builtin");
+
+fn writeStdout(data: []const u8) void {
+    if (builtin.target.os.tag == .windows) {
+        const c = @cImport({ @cInclude("io.h"); });
+        _ = c._write(1, data.ptr, @as(c_uint, @intCast(data.len)));
+    } else {
+        _ = std.os.linux.write(std.posix.STDOUT_FILENO, data.ptr, data.len);
+    }
+}
+
+fn readStdin(buf: []u8) usize {
+    if (builtin.target.os.tag == .windows) {
+        const c = @cImport({ @cInclude("io.h"); });
+        const n = c._read(0, buf.ptr, @as(c_uint, @intCast(buf.len)));
+        return if (n < 0) 0 else @intCast(n);
+    } else {
+        return std.os.linux.read(std.posix.STDIN_FILENO, buf.ptr, buf.len);
+    }
+}
+
 // Write JSON value to stdout as a JSON-RPC response
 fn writeJsonToStdout(value: std.json.Value) void {
     var buf: [16384]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{f}\n", .{std.json.fmt(value, .{})}) catch "";
-    _ = std.os.linux.write(std.posix.STDOUT_FILENO, s.ptr, s.len);
+    writeStdout(s);
 }
 
 // Convert a JSON value to a string representation (for embedding)
@@ -109,7 +130,7 @@ pub const Server = struct {
                     msg_len = remaining;
                 } else {
                     // No complete message — need to read more
-                    const n = std.os.linux.read(std.posix.STDIN_FILENO, read_buf[msg_len..].ptr, read_buf.len - msg_len);
+                    const n = readStdin(read_buf[msg_len..]);
                     if (n == 0) {
                         // EOF — process any remaining partial message
                         if (msg_len > 0) {

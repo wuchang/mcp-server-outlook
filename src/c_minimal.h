@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <time.h>
 #else
 #define _WIN32_WINNT 0x0601
 typedef unsigned long long size_t;
