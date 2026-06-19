@@ -2,7 +2,13 @@
 /// Uses OpenSSL-backed HTTPS requests
 
 const std = @import("std");
-const c = @cImport({
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
+const c = if (is_windows) @cImport({
+    @cInclude("time.h");
+    @cInclude("unistd.h");
+    @cInclude("io.h");
+}) else @cImport({
     @cInclude("time.h");
     @cInclude("unistd.h");
 });
@@ -71,7 +77,11 @@ pub fn getAccessToken(allocator: std.mem.Allocator, config: anytype) !AccessToke
         .{ device.verification_uri, device.user_code }
     );
     defer allocator.free(msg);
-    _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    if (is_windows) {
+        _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    } else {
+        _ = c.write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    }
 
     // Poll for token
     const token = try pollForToken(allocator, config.client_id, device.device_code, device.interval, device.expires_in);

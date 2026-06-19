@@ -2,9 +2,14 @@
 /// Uses Zig 0.16 std.json.fmt for serialization
 
 const std = @import("std");
-const c = @cImport({
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
+const c = if (is_windows) @cImport({
     @cInclude("stdio.h");
     @cInclude("io.h");
+}) else @cImport({
+    @cInclude("stdio.h");
+    @cInclude("unistd.h");
 });
 
 pub const ToolHandler = *const fn (args: ?std.json.Value, allocator: std.mem.Allocator) ToolError!ToolResult;
@@ -35,7 +40,11 @@ pub const ToolError = error{
 fn writeJsonToStdout(value: std.json.Value) void {
     var buf: [16384]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{f}\n", .{std.json.fmt(value, .{})}) catch "";
-    _ = c._write(1, s.ptr, @as(c_uint, @intCast(s.len)));
+    if (is_windows) {
+        _ = c._write(1, s.ptr, @as(c_uint, @intCast(s.len)));
+    } else {
+        _ = c.write(1, s.ptr, @as(c_uint, @intCast(s.len)));
+    }
 }
 
 // Convert a JSON value to a string representation (for embedding)
@@ -106,7 +115,10 @@ pub const Server = struct {
                     msg_len = remaining;
                 } else {
                     // No complete message — need to read more
-                    const n = @as(usize, @intCast(c._read(0, &read_buf[msg_len], @as(c_uint, @intCast(read_buf.len - msg_len)))));
+                    const n = if (is_windows)
+                        @as(usize, @intCast(c._read(0, &read_buf[msg_len], @as(c_uint, @intCast(read_buf.len - msg_len)))))
+                    else
+                        @as(usize, @intCast(c.read(0, &read_buf[msg_len], @as(c_uint, @intCast(read_buf.len - msg_len)))));
                     if (n == 0) {
                         // EOF — process any remaining partial message
                         if (msg_len > 0) {

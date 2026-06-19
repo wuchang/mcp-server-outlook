@@ -4,11 +4,16 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
-const c = @cImport({
+const c = if (is_windows) @cImport({
     @cInclude("windows.h");
     @cInclude("stdlib.h");
     @cInclude("stdio.h");
     @cInclude("io.h");
+}) else @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("stdio.h");
+    @cInclude("unistd.h");
+    @cInclude("sys/stat.h");
 });
 const log = @import("log.zig");
 const config_mod = @import("config.zig");
@@ -23,32 +28,32 @@ const task_handlers = @import("handlers/tasks.zig");
 
 const auth_oauth = @import("auth/oauth.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     if (is_windows) {
         _ = c.SetConsoleOutputCP(65001);
     }
     log.init();
 
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     // Parse argv: --help, --logout
     {
-        const arg_count = if (is_windows) c.__p___argc().* else @extern(*c_int, .{ .name = "__argc" }).*;
-        const arg_vec = if (is_windows) @as([*][*:0]u8, @ptrCast(c.__p___argv().*)) else @extern([*][*:0]u8, .{ .name = "__argv" });
-        if (arg_count > 1) {
-            const arg1 = std.mem.sliceTo(arg_vec[1], 0);
-            if (std.mem.eql(u8, arg1, "--help") or std.mem.eql(u8, arg1, "-h")) {
+        var arg_it = try std.process.Args.Iterator.initAllocator(init.minimal.args, allocator);
+        defer arg_it.deinit();
+        _ = arg_it.skip();
+        if (arg_it.next()) |arg| {
+            if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
                 printUsage();
                 return;
             }
-            if (std.mem.eql(u8, arg1, "--logout") or std.mem.eql(u8, arg1, "-l")) {
+            if (std.mem.eql(u8, arg, "--logout") or std.mem.eql(u8, arg, "-l")) {
                 doLogout();
                 return;
             }
         }
     }
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
 
     log.info("starting mcp-server-outlook v0.1.0", .{});
 
@@ -258,11 +263,9 @@ fn doLogout() void {
 
     const ret = c.remove(path_z.ptr);
     if (ret == 0) {
-        const ok = "✅ 已注销 — token 缓存文件已删除\n";
-        _ = c._write(1, ok.ptr, @as(c_uint, @intCast(ok.len)));
+        std.debug.print("Logged out — token cache file deleted\n", .{});
     } else {
-        const fail = "ℹ️  没有已保存的登录凭证\n";
-        _ = c._write(1, fail.ptr, @as(c_uint, @intCast(fail.len)));
+        std.debug.print("No saved login credentials found\n", .{});
     }
 }
 

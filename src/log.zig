@@ -9,11 +9,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const is_windows = builtin.os.tag == .windows;
-const c = @cImport({
+const c = if (is_windows) @cImport({
     @cInclude("windows.h");
     @cInclude("stdlib.h");
     @cInclude("time.h");
     @cInclude("io.h");
+}) else @cImport({
+    @cInclude("stdlib.h");
+    @cInclude("time.h");
+    @cInclude("unistd.h");
 });
 
 pub const Level = enum(u8) { debug, info, warn, err };
@@ -45,7 +49,11 @@ pub fn init() void {
 }
 
 fn writeStderr(msg: []const u8) void {
-    _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    if (is_windows) {
+        _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    } else {
+        _ = c.write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
+    }
 }
 
 fn elapsed() i64 {

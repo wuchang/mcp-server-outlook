@@ -4,13 +4,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = @import("log.zig");
 const is_windows = builtin.os.tag == .windows;
-const c = @cImport({
+const c = if (is_windows) @cImport({
     @cInclude("openssl/ssl.h");
     @cInclude("openssl/err.h");
     @cInclude("sys/socket.h");
     @cInclude("netdb.h");
     @cInclude("unistd.h");
     @cInclude("io.h");
+}) else @cImport({
+    @cInclude("openssl/ssl.h");
+    @cInclude("openssl/err.h");
+    @cInclude("sys/socket.h");
+    @cInclude("netdb.h");
+    @cInclude("unistd.h");
 });
 
 var ssl_ctx: ?*c.SSL_CTX = null;
@@ -100,7 +106,7 @@ fn sendRawFull(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
                 .ai_family = g_cached_sa.ss_family,
                 .ai_socktype = c.SOCK_STREAM,
                 .ai_addr = @ptrCast(&g_cached_sa),
-                .ai_addrlen = @as(usize, @intCast(g_cached_salen)),
+                .ai_addrlen = @as(c_uint, @intCast(g_cached_salen)),
             };
             dns_res = &fallback_sa;
             from_cache = true;
