@@ -29,8 +29,8 @@ pub const Config = struct {
         // 1. Try reading config file
         var client_id: ?[]const u8 = try readConfigFile(allocator, config_path);
 
-        // 2. Env var overrides file
-        const env_val = c.getenv("AZURE_CLIENT_ID");
+        // 2. Env var overrides file (supports both AZURE_CLIENT_ID and CLIENT_ID)
+        const env_val = c.getenv("AZURE_CLIENT_ID") orelse c.getenv("CLIENT_ID");
         if (env_val) |ptr| {
             if (client_id) |old| allocator.free(old);
             client_id = try allocator.dupe(u8, std.mem.sliceTo(ptr, 0));
@@ -71,19 +71,16 @@ fn getHome() []const u8 {
 
 /// Read KEY=VALUE lines from config file, look for CLIENT_ID
 fn readConfigFile(allocator: std.mem.Allocator, path: []const u8) !?[]const u8 {
-    // Use POSIX open/read — avoids fgets C translation bug in ReleaseSafe
     const path_z = try allocator.alloc(u8, path.len + 1);
     defer allocator.free(path_z);
     @memcpy(path_z[0..path.len], path);
     path_z[path.len] = 0;
 
-    const raw_fd = std.os.linux.open(@as([*:0]const u8, @ptrCast(path_z.ptr)), .{}, 0);
-    if (raw_fd > std.math.maxInt(i32)) return null;
-    const fd: i32 = @intCast(raw_fd);
-    defer _ = std.os.linux.close(fd);
+    const f = c.fopen(path_z.ptr, "r") orelse return null;
+    defer _ = c.fclose(f);
 
     var buf: [4096]u8 = undefined;
-    const n = std.os.linux.read(fd, &buf, buf.len);
+    const n = c.fread(&buf, 1, buf.len, f);
     if (n == 0) return null;
 
     // Parse line by line

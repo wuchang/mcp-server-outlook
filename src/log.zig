@@ -7,9 +7,13 @@
 ///   OUTLOOK_LOG=off   ./mcp-server-outlook   # 完全静默
 
 const std = @import("std");
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
 const c = @cImport({
+    @cInclude("windows.h");
     @cInclude("stdlib.h");
     @cInclude("time.h");
+    @cInclude("io.h");
 });
 
 pub const Level = enum(u8) { debug, info, warn, err };
@@ -18,9 +22,13 @@ var g_level: Level = .info;
 var g_start_ms: i64 = 0;
 
 fn monoMs() i64 {
-    var ts: c.struct_timespec = undefined;
-    _ = c.clock_gettime(c.CLOCK_MONOTONIC, &ts);
-    return @as(i64, @intCast(ts.tv_sec)) * 1000 + @divFloor(@as(i64, @intCast(ts.tv_nsec)), 1_000_000);
+    if (is_windows) {
+        return @as(i64, @intCast(c.GetTickCount64()));
+    } else {
+        var ts: c.struct_timespec = undefined;
+        _ = c.clock_gettime(c.CLOCK_MONOTONIC, &ts);
+        return @as(i64, @intCast(ts.tv_sec)) * 1000 + @divFloor(@as(i64, @intCast(ts.tv_nsec)), 1_000_000);
+    }
 }
 
 pub fn init() void {
@@ -37,7 +45,7 @@ pub fn init() void {
 }
 
 fn writeStderr(msg: []const u8) void {
-    _ = std.os.linux.write(std.posix.STDERR_FILENO, msg.ptr, msg.len);
+    _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
 }
 
 fn elapsed() i64 {

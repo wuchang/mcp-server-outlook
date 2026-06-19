@@ -2,10 +2,13 @@
 /// Microsoft Graph API via MCP protocol (JSON-RPC 2.0 over stdio)
 
 const std = @import("std");
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
 const c = @cImport({
+    @cInclude("windows.h");
     @cInclude("stdlib.h");
     @cInclude("stdio.h");
-    @cInclude("sys/stat.h");
+    @cInclude("io.h");
 });
 const log = @import("log.zig");
 const config_mod = @import("config.zig");
@@ -21,34 +24,24 @@ const task_handlers = @import("handlers/tasks.zig");
 const auth_oauth = @import("auth/oauth.zig");
 
 pub fn main() !void {
+    if (is_windows) {
+        _ = c.SetConsoleOutputCP(65001);
+    }
     log.init();
 
     // Parse argv: --help, --logout
     {
-        const raw_fd = std.os.linux.open("/proc/self/cmdline", .{}, 0);
-        if (raw_fd <= std.math.maxInt(i32)) {
-            const fd: i32 = @intCast(raw_fd);
-            defer _ = std.os.linux.close(fd);
-            var cmd_buf: [4096]u8 = undefined;
-            const n = std.os.linux.read(fd, &cmd_buf, cmd_buf.len);
-            if (n > 0) {
-                const args = cmd_buf[0..n];
-                var i: usize = 0;
-                while (i < args.len and args[i] != 0) i += 1;
-                i += 1;
-                const a1 = i;
-                while (i < args.len and args[i] != 0) i += 1;
-                if (i > a1) {
-                    const arg1 = args[a1..i];
-                    if (std.mem.eql(u8, arg1, "--help") or std.mem.eql(u8, arg1, "-h")) {
-                        printUsage();
-                        return;
-                    }
-                    if (std.mem.eql(u8, arg1, "--logout") or std.mem.eql(u8, arg1, "-l")) {
-                        doLogout();
-                        return;
-                    }
-                }
+        const arg_count = if (is_windows) c.__p___argc().* else @extern(*c_int, .{ .name = "__argc" }).*;
+        const arg_vec = if (is_windows) @as([*][*:0]u8, @ptrCast(c.__p___argv().*)) else @extern([*][*:0]u8, .{ .name = "__argv" });
+        if (arg_count > 1) {
+            const arg1 = std.mem.sliceTo(arg_vec[1], 0);
+            if (std.mem.eql(u8, arg1, "--help") or std.mem.eql(u8, arg1, "-h")) {
+                printUsage();
+                return;
+            }
+            if (std.mem.eql(u8, arg1, "--logout") or std.mem.eql(u8, arg1, "-l")) {
+                doLogout();
+                return;
             }
         }
     }
@@ -80,7 +73,7 @@ pub fn main() !void {
             defer allocator.free(config_z);
             @memcpy(config_z[0..config_dir.len], config_dir);
             config_z[config_dir.len] = 0;
-            _ = c.mkdir(config_z.ptr, 0o755); // ignore if exists
+            _ = if (is_windows) c.CreateDirectoryA(config_z.ptr, null) else c.mkdir(config_z.ptr, 0o755); // ignore if exists
 
             // Write template if file doesn't exist
             const path_z = try allocator.alloc(u8, config_path.len + 1);
@@ -246,7 +239,7 @@ fn makeSchema(fields: anytype) std.json.Value {
 
 fn printUsage() void {
     const msg = @embedFile("usage.txt");
-    _ = std.os.linux.write(std.posix.STDOUT_FILENO, msg.ptr, msg.len);
+    std.debug.print("{s}", .{msg});
 }
 
 fn doLogout() void {
@@ -266,10 +259,10 @@ fn doLogout() void {
     const ret = c.remove(path_z.ptr);
     if (ret == 0) {
         const ok = "✅ 已注销 — token 缓存文件已删除\n";
-        _ = std.os.linux.write(std.posix.STDOUT_FILENO, ok.ptr, ok.len);
+        _ = c._write(1, ok.ptr, @as(c_uint, @intCast(ok.len)));
     } else {
         const fail = "ℹ️  没有已保存的登录凭证\n";
-        _ = std.os.linux.write(std.posix.STDOUT_FILENO, fail.ptr, fail.len);
+        _ = c._write(1, fail.ptr, @as(c_uint, @intCast(fail.len)));
     }
 }
 

@@ -1,16 +1,20 @@
 /// HTTPS client using OpenSSL
 
 const std = @import("std");
+const builtin = @import("builtin");
 const log = @import("log.zig");
+const is_windows = builtin.os.tag == .windows;
 const c = @cImport({
     @cInclude("openssl/ssl.h");
     @cInclude("openssl/err.h");
     @cInclude("sys/socket.h");
     @cInclude("netdb.h");
     @cInclude("unistd.h");
+    @cInclude("io.h");
 });
 
 var ssl_ctx: ?*c.SSL_CTX = null;
+var wsa_started: bool = false;
 
 // ── DNS cache: store resolved sockaddr for fallback ──
 var g_cached_sa: c.sockaddr_storage = undefined;
@@ -19,6 +23,14 @@ var g_cached_host: []const u8 = "";
 
 pub fn init() !void {
     if (ssl_ctx != null) return;
+
+    if (is_windows and !wsa_started) {
+        var wsa: c.WSADATA = undefined;
+        if (c.WSAStartup(0x202, &wsa) == 0) {
+            wsa_started = true;
+        }
+    }
+
     _ = c.OPENSSL_init_ssl(0, null);
 
     const ctx = c.SSL_CTX_new(c.TLS_client_method());
@@ -34,14 +46,24 @@ pub fn deinit() void {
     }
 }
 
-/// Send raw HTTP bytes over TLS, return response body
-/// DNS resolved once (outside retry); connection retried up to 3 times
-pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_request: []const u8) ![]const u8 {
+pub const HttpResponse = struct {
+    body: []const u8,
+    status: u16,
+};
+
+/// Internal: send raw and return body+status (even on 4xx)
+fn sendRawFull(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_request: []const u8) !HttpResponse {
     if (ssl_ctx == null) try init();
     log.debug("sendRaw: host={s} port={d}", .{ host, port });
 
-    const port_str = try std.fmt.allocPrint(allocator, "{d}", .{port});
-    defer allocator.free(port_str);
+    const port_z = try std.fmt.allocPrint(allocator, "{d}\x00", .{port});
+    defer allocator.free(port_z);
+
+    // Null-terminate host for C getaddrinfo
+    const host_z = try allocator.alloc(u8, host.len + 1);
+    defer allocator.free(host_z);
+    @memcpy(host_z[0..host.len], host);
+    host_z[host.len] = 0;
 
     // ── DNS (with cache fallback) ──
     var dns_res: ?*c.struct_addrinfo = null;
@@ -51,9 +73,10 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
     var hints: c.struct_addrinfo = std.mem.zeroes(c.struct_addrinfo);
     hints.ai_family = c.AF_UNSPEC;
     hints.ai_socktype = c.SOCK_STREAM;
-    const rc = c.getaddrinfo(@as([*:0]const u8, @ptrCast(host.ptr)), port_str.ptr, &hints, &dns_res);
+    const rc = c.getaddrinfo(host_z.ptr, port_z.ptr, &hints, &dns_res);
+    log.debug("getaddrinfo rc={d}", .{rc});
     if (rc == 0 and dns_res != null) {
-        log.debug("DNS ok {s}:{s}", .{ host, port_str });
+        log.debug("DNS ok {s}:{s}", .{ host, port_z });
         // Cache
         if (dns_res.?.ai_addrlen <= @sizeOf(@TypeOf(g_cached_sa))) {
             const src = @as([*]const u8, @ptrCast(dns_res.?.ai_addr))[0..dns_res.?.ai_addrlen];
@@ -62,20 +85,22 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
             if (g_cached_sa.ss_family == c.AF_INET) {
                 @as(*c.sockaddr_in, @ptrCast(&g_cached_sa)).sin_port = c.htons(@as(u16, @intCast(port)));
             } else if (g_cached_sa.ss_family == c.AF_INET6) {
-                @as(*c.sockaddr_in6, @ptrCast(&g_cached_sa)).sin6_port = c.htons(@as(u16, @intCast(port)));
+                const port_be = c.htons(@as(u16, @intCast(port)));
+                const port_dst = @as([*]u8, @ptrCast(&g_cached_sa)) + 2;
+                @memcpy(port_dst[0..2], std.mem.asBytes(&port_be));
             }
-            g_cached_salen = dns_res.?.ai_addrlen;
+            g_cached_salen = @intCast(dns_res.?.ai_addrlen);
             g_cached_host = host;
         }
     } else {
-        log.debug("DNS failed {s}:{s} code={d}, trying cache", .{ host, port_str, rc });
+        log.debug("DNS failed {s}:{s} code={d}, trying cache", .{ host, port_z, rc });
         if (std.mem.eql(u8, host, g_cached_host) and g_cached_salen > 0) {
             log.info("using cached address for {s}", .{host});
             fallback_sa = .{
                 .ai_family = g_cached_sa.ss_family,
                 .ai_socktype = c.SOCK_STREAM,
                 .ai_addr = @ptrCast(&g_cached_sa),
-                .ai_addrlen = g_cached_salen,
+                .ai_addrlen = @as(usize, @intCast(g_cached_salen)),
             };
             dns_res = &fallback_sa;
             from_cache = true;
@@ -87,25 +112,37 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
     // ── Connection retry (each attempt self-contained with defer cleanup) ──
     for (0..3) |attempt| {
         if (attempt > 0) {
-            var ts = c.struct_timespec{ .tv_sec = 1, .tv_nsec = 0 };
-            _ = c.nanosleep(&ts, null);
+            // 1-second sleep between retries
+            if (is_windows) {
+                _ = c.Sleep(1000);
+            } else {
+                var ts = c.struct_timespec{ .tv_sec = 1, .tv_nsec = 0 };
+                _ = c.nanosleep(&ts, null);
+            }
         }
         attempt: {
             const sock = c.socket(dns_res.?.ai_family, dns_res.?.ai_socktype, dns_res.?.ai_protocol);
-            if (sock < 0) break :attempt;
-            defer _ = c.close(sock);
+            if (if (is_windows) sock == c.INVALID_SOCKET else sock < 0) break :attempt;
+            defer _ = if (is_windows) c.closesocket(sock) else c.close(sock);
 
-            if (c.connect(sock, dns_res.?.ai_addr, dns_res.?.ai_addrlen) < 0) {
-                log.debug("connect {s}:{s} fail (try {d}/3)", .{ host, port_str, attempt + 1 });
+            if (c.connect(sock, dns_res.?.ai_addr, @intCast(dns_res.?.ai_addrlen)) < 0) {
+                log.debug("connect {s}:{s} fail (try {d}/3)", .{ host, port_z, attempt + 1 });
                 break :attempt;
             }
 
             const ssl = c.SSL_new(ssl_ctx) orelse return error.SslNewFailed;
             defer c.SSL_free(ssl);
-            _ = c.SSL_set_fd(ssl, sock);
+            if (is_windows) {
+                const bio = c.BIO_new(c.BIO_s_socket());
+                if (bio == null) return error.SslNewFailed;
+                _ = c.BIO_set_fd(bio, @as(c_int, @intCast(sock)), c.BIO_NOCLOSE);
+                c.SSL_set_bio(ssl, bio, bio);
+            } else {
+                _ = c.SSL_set_fd(ssl, @intCast(sock));
+            }
 
             if (c.SSL_connect(ssl) <= 0) {
-                log.debug("TLS handshake {s}:{s} fail (try {d}/3)", .{ host, port_str, attempt + 1 });
+                log.debug("TLS handshake {s}:{s} fail (try {d}/3)", .{ host, port_z, attempt + 1 });
                 break :attempt;
             }
 
@@ -138,16 +175,32 @@ pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_re
                     sc = std.fmt.parseInt(u16, status_line[9..12], 10) catch 0;
                 }
                 if (sc >= 400) {
-                    log.warn("HTTP {d} from {s}:{s} — {s}", .{ sc, host, port_str, body[0..@min(body.len, 200)] });
-                    return error.HttpError;
+                    log.warn("HTTP {d} from {s}:{s} — {s}", .{ sc, host, port_z, body[0..@min(body.len, 200)] });
                 }
-                return try allocator.dupe(u8, body);
+                return HttpResponse{ .body = try allocator.dupe(u8, body), .status = sc };
             }
             log.debug("bad HTTP response (try {d}/3)", .{attempt + 1});
             break :attempt;
         }
     }
     return error.DnsResolutionFailed;
+}
+
+/// Public wrapper: returns error.HttpError for 4xx+, otherwise body
+pub fn sendRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, raw_request: []const u8) ![]const u8 {
+    const resp = try sendRawFull(allocator, host, port, raw_request);
+    if (resp.status >= 400) return error.HttpError;
+    return resp.body;
+}
+
+/// POST returning full response even on 4xx (for OAuth polling)
+pub fn postFormRaw(allocator: std.mem.Allocator, host: []const u8, port: u16, path: []const u8, body: []const u8) !HttpResponse {
+    const req = try std.fmt.allocPrint(allocator,
+        "POST {s} HTTP/1.1\r\nHost: {s}\r\nUser-Agent: mcp-server-outlook/0.1.0\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {d}\r\nAccept: application/json\r\nConnection: close\r\n\r\n{s}",
+        .{ path, host, body.len, body }
+    );
+    defer allocator.free(req);
+    return sendRawFull(allocator, host, port, req);
 }
 
 /// Simple GET

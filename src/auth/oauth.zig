@@ -71,7 +71,7 @@ pub fn getAccessToken(allocator: std.mem.Allocator, config: anytype) !AccessToke
         .{ device.verification_uri, device.user_code }
     );
     defer allocator.free(msg);
-    _ = std.os.linux.write(std.posix.STDERR_FILENO, msg.ptr, msg.len);
+    _ = c._write(2, msg.ptr, @as(c_uint, @intCast(msg.len)));
 
     // Poll for token
     const token = try pollForToken(allocator, config.client_id, device.device_code, device.interval, device.expires_in);
@@ -166,7 +166,7 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
         }
         log.debug("polling token endpoint (attempt {d}, elapsed {d}s)", .{ poll_count, elapsed });
 
-        const response = tls.postForm(allocator, login_host, 443, login_path ++ "/token", body) catch |err| {
+        const http_resp = tls.postFormRaw(allocator, login_host, 443, login_path ++ "/token", body) catch |err| {
             switch (err) {
                 error.DnsResolutionFailed,
                 error.SslInitFailed,
@@ -175,16 +175,22 @@ fn pollForToken(allocator: std.mem.Allocator, client_id: []const u8, device_code
                 else => return err,
             }
         };
-        defer allocator.free(response);
+        defer allocator.free(http_resp.body);
 
-        const parsed = std.json.parseFromSlice(std.json.Value, allocator, response, .{}) catch continue;
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, http_resp.body, .{}) catch {
+            if (http_resp.status >= 400) {
+                log.warn("token poll HTTP {d} (unparseable body)", .{http_resp.status});
+                continue;
+            }
+            return error.TokenRequestFailed;
+        };
         defer parsed.deinit();
 
         const obj = parsed.value.object;
         if (obj.get("error")) |err_val| {
             const err_str = if (err_val == .string) err_val.string else "";
             const desc = if (obj.get("error_description")) |d| (if (d == .string) d.string else "") else "";
-            log.warn("token poll HTTP response ({d} bytes): {s}", .{ response.len, response[0..@min(response.len, 400)] });
+            log.warn("token poll HTTP response ({d} bytes): {s}", .{ http_resp.body.len, http_resp.body[0..@min(http_resp.body.len, 400)] });
             // authorization_pending / slow_down → 继续轮询
             if (std.mem.eql(u8, err_str, "authorization_pending") or
                 std.mem.eql(u8, err_str, "slow_down")) {

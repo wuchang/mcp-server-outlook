@@ -19,6 +19,8 @@ pub fn build(b: *std.Build) void {
         exe_mod.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ dir, "lib" }) });
     }
     if (target.result.os.tag == .windows) {
+        exe_mod.addIncludePath(b.path("src/compat"));
+        exe_mod.linkSystemLibrary("ws2_32", .{});
         exe_mod.linkSystemLibrary("libssl", .{});
         exe_mod.linkSystemLibrary("libcrypto", .{});
     } else {

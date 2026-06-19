@@ -1,6 +1,8 @@
 /// Token cache — persist refresh token to local file via libc
 
 const std = @import("std");
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
 const c = @cImport({
     @cInclude("stdio.h");
     @cInclude("stdlib.h");
@@ -16,8 +18,17 @@ pub const TokenCache = struct {
         return .{ .allocator = allocator, .path = path };
     }
 
+    fn toCStr(self: *const TokenCache) ![:0]u8 {
+        const z = try self.allocator.alloc(u8, self.path.len + 1);
+        @memcpy(z[0..self.path.len], self.path);
+        z[self.path.len] = 0;
+        return z[0..self.path.len :0];
+    }
+
     pub fn load(self: *const TokenCache) !?TokenData {
-        const file = c.fopen(@as([*:0]const u8, @ptrCast(self.path.ptr)), "r");
+        const path_z = try self.toCStr();
+        defer self.allocator.free(path_z);
+        const file = c.fopen(path_z.ptr, "r");
         if (file == null) return null;
         defer _ = c.fclose(file);
 
@@ -60,11 +71,11 @@ pub const TokenCache = struct {
             for (dir_buf, 0..) |*ch, i| {
                 if (ch.* == '/') {
                     dir_buf[i] = 0;
-                    _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr)), 0o755);
+                    _ = if (is_windows) c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr))) else c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr)), 0o755);
                     dir_buf[i] = '/';
                 }
             }
-            _ = c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr)), 0o755);
+            _ = if (is_windows) c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr))) else c.mkdir(@as([*:0]const u8, @ptrCast(dir_buf.ptr)), 0o755);
         }
 
         // Build JSON content
@@ -87,14 +98,18 @@ pub const TokenCache = struct {
         }
         try lines.appendSlice(self.allocator, "}\n");
 
-        const file = c.fopen(@as([*:0]const u8, @ptrCast(self.path.ptr)), "w");
+        const path_z = try self.toCStr();
+        defer self.allocator.free(path_z);
+        const file = c.fopen(path_z.ptr, "w");
         if (file == null) return;
         defer _ = c.fclose(file);
         _ = c.fwrite(lines.items.ptr, 1, lines.items.len, file);
     }
 
     pub fn clear(self: *const TokenCache) !void {
-        _ = c.remove(@as([*:0]const u8, @ptrCast(self.path.ptr)));
+        const path_z = try self.toCStr();
+        defer self.allocator.free(path_z);
+        _ = c.remove(path_z.ptr);
     }
 };
 

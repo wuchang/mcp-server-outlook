@@ -8,19 +8,68 @@
 
 ## 安装
 
+### 预编译二进制
+
+从 [Releases](https://github.com/anomalyco/mcp-server-outlook/releases) 下载对应平台的 zip/tar.gz，解压即用。
+
 ### 从源码构建
 
-```bash
-# 系统依赖
-sudo apt install libssl-dev   # Debian/Ubuntu
-# 或 brew install openssl     # macOS
-# 或 pacman -S openssl        # Arch
+需要 **Zig 0.16.0+** 和 **OpenSSL**（构建时链接，运行时动态加载）。
 
-# 需要 Zig 0.16+
+#### Linux (x86_64)
+
+```bash
+# Debian/Ubuntu
+sudo apt install libssl-dev
+# Arch
+sudo pacman -S openssl
+# Fedora
+sudo dnf install openssl-devel
+
 zig build -Doptimize=ReleaseSafe
 ```
 
-产物在 `zig-out/bin/mcp-server-outlook`（Debug ~17MB，ReleaseSafe ~4MB / strip 后 ~750KB）。
+产物：`zig-out/bin/mcp-server-outlook`
+
+#### macOS (x86_64 / arm64)
+
+```bash
+brew install openssl zig
+
+# macOS 需要指定 OpenSSL 路径（Homebrew 安装路径因架构而异）
+zig build -Doptimize=ReleaseSafe \
+  "-Dopenssl-dir=$(brew --prefix openssl)"
+```
+
+产物：`zig-out/bin/mcp-server-outlook`
+
+#### Windows (x86_64)
+
+```powershell
+# 1. 安装 Zig 0.16.0
+scoop install zig@0.16.0
+# 或用 winget: winget install "Zig Development Platform" -v 0.16.0
+
+# 2. 安装 OpenSSL
+scoop install openssl
+
+# 3. 构建（必须指定 target 和 openssl-dir）
+zig build "-Dtarget=x86_64-windows-gnu" `
+  "-Dopenssl-dir=C:\Users\$env:USERNAME\scoop\apps\openssl\current" `
+  "-Doptimize=ReleaseSafe"
+
+# 4. 运行前需将 OpenSSL DLLs 放到同目录或 PATH 中
+copy "%USERPROFILE%\scoop\apps\openssl\current\bin\libssl-4-x64.dll" zig-out\bin\
+copy "%USERPROFILE%\scoop\apps\openssl\current\bin\libcrypto-4-x64.dll" zig-out\bin\
+```
+
+产物：`zig-out\bin\mcp-server-outlook.exe` + `libssl-4-x64.dll` + `libcrypto-4-x64.dll`
+
+> **为什么 Windows 需要额外的参数？**
+> - `-Dtarget=x86_64-windows-gnu`：使用 MinGW 环境，保证 POSIX socket API 兼容
+> - `-Dopenssl-dir=...`：Zig 的 `build.zig` 需要显式指定 OpenSSL 头文件和库目录
+
+构建产物大小：Debug ~17MB，ReleaseSafe ~4MB（strip 后 ~750KB）。
 
 ### 验证
 
